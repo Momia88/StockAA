@@ -1,0 +1,12 @@
+# StockAA 桌面版（Streamlit Web UI）執行所需相依
+# 供 GitHub Actions 以 PyInstaller 打包時安裝。
+# 注意：不含 CLI（typer）、API（fastapi/uvicorn）、資料庫遷移（alembic）等非必要套件。
+
+streamlit>=1.58
+plotly>=6.0
+pandas>=2.2
+sqlalchemy>=2.0
+pydantic>=2.7
+pydantic-settings>=2.3
+requests>=2.32
+loguru>=0.7

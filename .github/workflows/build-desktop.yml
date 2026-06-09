@@ -1,0 +1,70 @@
+name: Build Desktop App
+
+# 觸發方式：
+#   1) 推送 v 開頭的 tag（如 v1.0.0）→ 建置並附加到 Release
+#   2) 在 Actions 頁面手動執行（workflow_dispatch）
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest      # Apple Silicon (arm64)
+            label: macOS-arm64
+            artifact: StockAA-macOS-arm64
+          - os: windows-latest    # Windows x64
+            label: Windows-x64
+            artifact: StockAA-Windows-x64
+          # 如需 Intel Mac，另加一行：
+          #   - os: macos-13
+          #     label: macOS-x64
+          #     artifact: StockAA-macOS-x64
+
+    steps:
+      - name: 取出原始碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # PyInstaller 完整支援，避開本機 3.14 風險
+
+      - name: 安裝相依套件
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-desktop.txt
+          pip install pyinstaller
+
+      - name: PyInstaller 打包
+        run: pyinstaller packaging/StockAA.spec --noconfirm
+
+      - name: 壓縮產物（macOS）
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          zip -r "../${{ matrix.artifact }}.zip" StockAA
+
+      - name: 壓縮產物（Windows）
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/StockAA -DestinationPath ${{ matrix.artifact }}.zip
+
+      - name: 上傳建置產物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+          retention-days: 30
+
+      - name: 附加到 Release（僅 tag 觸發時）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}.zip

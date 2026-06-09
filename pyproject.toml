@@ -1,0 +1,59 @@
+[tool.poetry]
+name = "stockaa"
+version = "0.1.0"
+description = "台灣股市個股與 ETF 投資組合管理系統"
+authors = ["Morris Chen"]
+readme = "README.md"
+packages = [{include = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# 資料庫 ORM
+sqlalchemy = "^2.0"
+alembic = "^1.13"
+
+# 資料驗證與設定
+pydantic = "^2.7"
+pydantic-settings = "^2.3"
+
+# 金融數據
+requests = "^2.32"
+pandas = "^2.2"
+
+# CLI 介面
+typer = {extras = ["all"], version = ">=0.12"}
+rich = "^13.7"
+
+# 日誌
+loguru = "^0.7"
+
+# 日期處理
+python-dateutil = "^2.9"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2"
+pytest-asyncio = "^0.23"
+black = "^24.4"
+isort = "^5.13"
+mypy = "^1.10"
+
+[tool.poetry.scripts]
+stockaa = "src.cli.main:app"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

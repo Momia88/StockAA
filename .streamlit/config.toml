@@ -1,0 +1,5 @@
+[client]
+# 隱藏自動偵測 pages/ 目錄產生的預設導覽列（已有自製中文側邊欄）
+showSidebarNavigation = false
+# 隱藏右上角 Deploy / 三點選單（本地使用不需要）
+toolbarMode = "viewer"

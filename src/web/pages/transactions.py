@@ -18,7 +18,7 @@ ACTION_COLOR = {
 
 
 def render():
-    st.title("📋 交易記錄")
+    st.subheader("交易記錄")
 
     col1, col2, col3 = st.columns([2, 2, 1])
     with col1:

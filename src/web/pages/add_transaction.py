@@ -14,7 +14,7 @@ from src.web.data import (
 
 
 def render():
-    st.title("➕ 新增交易")
+    st.subheader("新增交易")
 
     tab_buy, tab_sell, tab_div, tab_split = st.tabs(["買入", "賣出", "現金股利", "股票分割"])
 

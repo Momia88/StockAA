@@ -10,7 +10,7 @@ from src.web.data import get_portfolio_summary, get_transactions
 
 
 def render():
-    st.title("📊 損益分析")
+    st.subheader("損益分析")
 
     with st.spinner("載入資料..."):
         try:

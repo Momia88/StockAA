@@ -12,32 +12,49 @@ st.set_page_config(
     page_title="StockAA 投資組合",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
-# ── 側邊欄 ──────────────────────────────────
-with st.sidebar:
-    st.title("📈 StockAA")
-    st.caption("台灣股市投資組合管理")
-    st.divider()
-    page = st.radio(
-        "選擇頁面",
-        ["🏠 持倉總覽", "➕ 新增交易", "📋 交易記錄", "📊 損益分析"],
-        label_visibility="collapsed",
-    )
-    st.divider()
-    st.caption("資料來源：TWSE / TPEx Open API")
+st.markdown("""
+<style>
+/* 隱藏側邊欄與收合按鈕 */
+[data-testid="stSidebar"],
+[data-testid="collapsedControl"] { display: none !important; }
 
-# ── 頁面路由 ─────────────────────────────────
-if page == "🏠 持倉總覽":
+/* 左右留白、限制最大寬度 */
+.block-container {
+    max-width: 1320px;
+    padding: 1.5rem 4rem 3rem !important;
+    margin: 0 auto;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ── 頂部 Logo ──────────────────────────────────
+st.markdown(
+    "## 📈 StockAA &emsp;"
+    "<span style='font-size:1rem;font-weight:400;color:gray'>台灣股市投資組合管理</span>",
+    unsafe_allow_html=True,
+)
+st.divider()
+
+# ── Tab 導覽 ───────────────────────────────────
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["🏠 持倉總覽", "➕ 新增交易", "📋 交易記錄", "📊 損益分析"]
+)
+
+with tab1:
     from src.web.pages.dashboard import render
     render()
-elif page == "➕ 新增交易":
-    from src.web.pages.add_transaction import render
-    render()
-elif page == "📋 交易記錄":
-    from src.web.pages.transactions import render
-    render()
-elif page == "📊 損益分析":
-    from src.web.pages.charts import render
-    render()
+
+with tab2:
+    from src.web.pages.add_transaction import render as render_add
+    render_add()
+
+with tab3:
+    from src.web.pages.transactions import render as render_tx
+    render_tx()
+
+with tab4:
+    from src.web.pages.charts import render as render_charts
+    render_charts()

@@ -9,10 +9,10 @@ _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from datetime import date
 from typing import Optional
 
-from src.models.database import create_all_tables, get_db_session, get_engine, get_session_factory
+from sqlalchemy.orm import sessionmaker as _sessionmaker
+from src.models.database import create_all_tables, get_db_session, get_engine
 from src.models.enums import AssetType, Exchange
 from src.repositories.asset_repo import AssetRepository
 from src.repositories.transaction_repo import TransactionRepository
@@ -20,9 +20,7 @@ from src.services.calculation_service import CalculationService, PortfolioSummar
 from src.services.portfolio_service import PortfolioService
 from src.data_providers.price_manager import PriceManager
 from src.utils.config import get_settings
-from src.utils.exceptions import (
-    AssetNotFoundError, InsufficientHoldingsError, InvalidTransactionError
-)
+from src.utils.exceptions import AssetNotFoundError
 
 import streamlit as st
 
@@ -32,7 +30,12 @@ def _get_session_factory():
     settings = get_settings()
     engine = get_engine(settings.db_path)
     create_all_tables(engine)
-    return get_session_factory(engine)
+    return _sessionmaker(
+        bind=engine,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+    )
 
 
 def get_portfolio_summary(include_closed: bool = False, no_price: bool = False) -> PortfolioSummary:

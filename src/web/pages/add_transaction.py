@@ -9,8 +9,19 @@ from src.utils.exceptions import (
     AssetNotFoundError, InsufficientHoldingsError, InvalidTransactionError
 )
 from src.web.data import (
-    do_buy, do_sell, do_dividend, do_split, get_asset_tickers
+    do_buy, do_sell, do_dividend, do_split,
+    get_asset_tickers, get_recent_assets, get_last_trade_date,
 )
+
+_TYPE_LABEL = {"STOCK": "個股", "STOCK_ETF": "股票ETF", "BOND_ETF": "債券ETF"}
+
+
+def _prefill_buy(asset: dict):
+    """快速按鈕 callback：將常用股票帶入買入表單"""
+    st.session_state["buy_ticker"] = asset["ticker"]
+    st.session_state["buy_name"] = asset["name"]
+    st.session_state["buy_type"] = asset["asset_type"]
+    st.session_state["buy_exchange"] = asset["exchange"]
 
 
 def render():
@@ -18,24 +29,42 @@ def render():
 
     tab_buy, tab_sell, tab_div, tab_split = st.tabs(["買入", "賣出", "現金股利", "股票分割"])
 
+    default_date = get_last_trade_date() or date.today()
+
     # ── 買入 ──────────────────────────────────
     with tab_buy:
         st.subheader("📥 買入股票")
+
+        # 常用股票快速帶入
+        recent = get_recent_assets(limit=6)
+        if recent:
+            st.caption("常用股票（點擊快速帶入）")
+            cols = st.columns(len(recent))
+            for col, a in zip(cols, recent):
+                col.button(
+                    f"{a['ticker']} {a['name']}",
+                    key=f"recent_{a['ticker']}",
+                    use_container_width=True,
+                    on_click=_prefill_buy,
+                    args=(a,),
+                )
+
         with st.form("buy_form"):
             c1, c2 = st.columns(2)
-            ticker = c1.text_input("股票代碼 *", placeholder="如：2330、0050、00679B")
-            name = c2.text_input("股票名稱 *", placeholder="如：台積電")
+            ticker = c1.text_input("股票代碼 *", placeholder="如：2330、0050、00679B", key="buy_ticker")
+            name = c2.text_input("股票名稱 *", placeholder="如：台積電", key="buy_name")
 
             c3, c4 = st.columns(2)
             asset_type = c3.selectbox("資產類型", ["STOCK", "STOCK_ETF", "BOND_ETF"],
-                                       format_func=lambda x: {"STOCK": "個股", "STOCK_ETF": "股票ETF", "BOND_ETF": "債券ETF"}[x])
+                                       format_func=lambda x: _TYPE_LABEL[x], key="buy_type")
             exchange = c4.selectbox("交易所", ["TWSE", "TPEx"],
-                                     format_func=lambda x: {"TWSE": "上市（TWSE）", "TPEx": "上櫃（TPEx）"}[x])
+                                     format_func=lambda x: {"TWSE": "上市（TWSE）", "TPEx": "上櫃（TPEx）"}[x],
+                                     key="buy_exchange")
 
             c5, c6, c7 = st.columns(3)
             price = c5.number_input("買入單價（元/股）*", min_value=0.01, step=0.01, format="%.2f")
             quantity = c6.number_input("股數 *", min_value=1, step=1)
-            trade_date = c7.date_input("交易日期", value=date.today())
+            trade_date = c7.date_input("交易日期", value=default_date)
 
             note = st.text_input("備註（選填）")
 
@@ -72,7 +101,7 @@ def render():
         with st.form("sell_form"):
             c1, c2 = st.columns(2)
             ticker_sell = c1.selectbox("股票代碼 *", tickers if tickers else ["（無持倉）"])
-            trade_date_sell = c2.date_input("交易日期", value=date.today(), key="sell_date")
+            trade_date_sell = c2.date_input("交易日期", value=default_date, key="sell_date")
 
             c3, c4 = st.columns(2)
             price_sell = c3.number_input("賣出單價（元/股）*", min_value=0.01, step=0.01, format="%.2f", key="sell_price")
@@ -112,7 +141,7 @@ def render():
         with st.form("div_form"):
             c1, c2 = st.columns(2)
             ticker_div = c1.selectbox("股票代碼 *", tickers_div if tickers_div else ["（無持倉）"])
-            trade_date_div = c2.date_input("發放日期", value=date.today(), key="div_date")
+            trade_date_div = c2.date_input("發放日期", value=default_date, key="div_date")
 
             c3, c4 = st.columns(2)
             dps = c3.number_input("每股股利（元）*", min_value=0.0001, step=0.01, format="%.4f")
@@ -148,7 +177,7 @@ def render():
         with st.form("split_form"):
             c1, c2 = st.columns(2)
             ticker_sp = c1.selectbox("股票代碼 *", tickers_sp if tickers_sp else ["（無持倉）"])
-            trade_date_sp = c2.date_input("分割日期", value=date.today(), key="split_date")
+            trade_date_sp = c2.date_input("分割日期", value=default_date, key="split_date")
 
             ratio = st.number_input(
                 "分割比例 *",

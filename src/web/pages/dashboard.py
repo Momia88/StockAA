@@ -164,3 +164,48 @@ def render():
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+
+        # ── 股債配置（純股票 vs 純債券） ──────────
+        stock_v = by_type.get("個股", 0) + by_type.get("股票ETF", 0)
+        bond_v  = by_type.get("債券ETF", 0)
+        total_sb = stock_v + bond_v or 1
+
+        st.markdown("##### 股債配置")
+        sb1, sb2 = st.columns(2)
+        sb1.metric(
+            "📈 股票部位",
+            f"{stock_v / total_sb * 100:.1f} %",
+            help=f"個股 + 股票ETF 共 {stock_v:,.0f} 元",
+        )
+        sb2.metric(
+            "🛡️ 債券部位",
+            f"{bond_v / total_sb * 100:.1f} %",
+            help=f"債券ETF 共 {bond_v:,.0f} 元",
+        )
+        # 比例橫條
+        stock_pct = stock_v / total_sb * 100
+        bond_pct = bond_v / total_sb * 100
+        st.markdown(
+            f"<div style='display:flex;height:22px;border-radius:6px;overflow:hidden;"
+            f"font-size:12px;color:white;line-height:22px;text-align:center'>"
+            f"<div style='width:{stock_pct}%;background:#ef5350'>"
+            f"{'股 ' + format(stock_pct, '.0f') + '%' if stock_pct >= 12 else ''}</div>"
+            f"<div style='width:{bond_pct}%;background:#66bb6a'>"
+            f"{'債 ' + format(bond_pct, '.0f') + '%' if bond_pct >= 12 else ''}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── 集中度警示 ────────────────────────────────
+    if values:
+        top = max(zip(labels, names, values), key=lambda x: x[2])
+        top_pct = top[2] / (sum(values) or 1) * 100
+        if top_pct >= 70:
+            st.error(
+                f"⚠️ 高度集中：**{top[0]} {top[1]}** 占投資組合 **{top_pct:.1f}%**，"
+                f"單一持股風險偏高，建議分散配置。"
+            )
+        elif top_pct >= 50:
+            st.warning(
+                f"📌 注意集中度：**{top[0]} {top[1]}** 占投資組合 **{top_pct:.1f}%**。"
+            )

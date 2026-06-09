@@ -360,3 +360,149 @@ class PortfolioService:
             f"股數 {old_qty}→{new_qty} 均成本 {old_avg_cost:.4f}→{new_avg_cost:.4f}"
         )
         return asset, tx
+
+    # ──────────────────────────────────────────
+    # 刪除交易 + 重算持倉
+    # ──────────────────────────────────────────
+    def delete_transaction(self, tx_id: str) -> str:
+        """刪除指定交易並從剩餘交易重建持倉狀態"""
+        tx = self.tx_repo.get_by_id(tx_id)
+        if tx is None:
+            raise InvalidTransactionError(f"找不到交易記錄：{tx_id}")
+        ticker = tx.ticker
+        self.tx_repo.delete(tx_id)
+        self._recalculate_asset(ticker)
+        logger.info(f"[Portfolio] 刪除交易 {tx_id}，已重算 {ticker} 持倉")
+        return ticker
+
+    def edit_transaction(
+        self,
+        tx_id: str,
+        price: float,
+        quantity: int,
+        trade_date,
+        note: Optional[str] = None,
+    ) -> tuple[Asset, Transaction]:
+        """修改交易（刪舊記錄→重算持倉→以修正值新增）"""
+        tx = self.tx_repo.get_by_id(tx_id)
+        if tx is None:
+            raise InvalidTransactionError(f"找不到交易記錄：{tx_id}")
+
+        ticker = tx.ticker
+        action = tx.action
+        asset = self.asset_repo.get_by_ticker(ticker)
+
+        # 先儲存 BUY 需要的欄位（刪除後 asset 還在，但先記住）
+        asset_name = asset.name if asset else ticker
+        asset_type = asset.asset_type if asset else None
+        asset_exchange = asset.exchange if asset else None
+
+        self.tx_repo.delete(tx_id)
+        self._recalculate_asset(ticker)
+
+        if action == TxAction.BUY:
+            if asset_type is None or asset_exchange is None:
+                raise InvalidTransactionError(f"找不到 {ticker} 的持倉資訊，無法重建買入交易")
+            return self.buy(
+                ticker=ticker, name=asset_name,
+                asset_type=asset_type, exchange=asset_exchange,
+                price=price, quantity=quantity, trade_date=trade_date, note=note,
+            )
+        elif action == TxAction.SELL:
+            return self.sell(
+                ticker=ticker, price=price, quantity=quantity,
+                trade_date=trade_date, note=note,
+            )
+        elif action == TxAction.DIVIDEND:
+            return self.add_dividend(
+                ticker=ticker, dividend_per_share=price,
+                quantity=quantity, trade_date=trade_date, note=note,
+            )
+        elif action == TxAction.STOCK_DIVIDEND:
+            return self.add_stock_dividend(
+                ticker=ticker, bonus_shares=quantity,
+                trade_date=trade_date, note=note,
+            )
+        elif action == TxAction.SPLIT:
+            # SPLIT 需要 ratio，由 edit_split_transaction 處理
+            raise InvalidTransactionError("股票分割請使用「刪除後重新新增」方式修改")
+        else:
+            raise InvalidTransactionError(f"不支援修改的交易類型：{action}")
+
+    def edit_split_transaction(
+        self,
+        tx_id: str,
+        split_ratio: float,
+        trade_date,
+        note: Optional[str] = None,
+    ) -> tuple[Asset, Transaction]:
+        """修改分割交易（刪除→重算→以新比例重建）"""
+        tx = self.tx_repo.get_by_id(tx_id)
+        if tx is None:
+            raise InvalidTransactionError(f"找不到交易記錄：{tx_id}")
+        ticker = tx.ticker
+        self.tx_repo.delete(tx_id)
+        self._recalculate_asset(ticker)
+        return self.add_split(ticker, split_ratio, trade_date, note)
+
+    # ──────────────────────────────────────────
+    # 內部：從交易記錄重建持倉狀態
+    # ──────────────────────────────────────────
+    def _recalculate_asset(self, ticker: str) -> None:
+        """從所有剩餘交易按時序重播，重建 Asset 的各項數值"""
+        asset = self.asset_repo.get_by_ticker(ticker)
+        if asset is None:
+            return
+
+        txs = sorted(
+            self.tx_repo.get_by_ticker(ticker),
+            key=lambda t: (t.trade_date, t.created_at),
+        )
+
+        qty = 0
+        avg_cost = 0.0
+        total_invested = 0.0
+        realized_pnl = 0.0
+        total_dividend = 0.0
+        first_buy_date = None
+
+        for tx in txs:
+            if tx.action == TxAction.BUY:
+                avg_cost = calc_new_avg_cost(qty, avg_cost, tx.quantity, tx.price, tx.fee)
+                qty += tx.quantity
+                total_invested += tx.net_amount
+                tx.avg_cost_at_tx = avg_cost
+                if first_buy_date is None or tx.trade_date < first_buy_date:
+                    first_buy_date = tx.trade_date
+
+            elif tx.action == TxAction.SELL:
+                pnl = calc_realized_pnl(tx.quantity, tx.price, avg_cost, tx.fee, tx.tax)
+                tx.realized_pnl = pnl
+                tx.avg_cost_at_tx = avg_cost
+                realized_pnl += pnl
+                qty -= tx.quantity
+                total_invested += tx.net_amount  # 負數（收入）
+
+            elif tx.action == TxAction.DIVIDEND:
+                total_dividend += tx.price * tx.quantity
+
+            elif tx.action == TxAction.STOCK_DIVIDEND:
+                new_qty = qty + tx.quantity
+                avg_cost = round((avg_cost * qty) / new_qty, 4) if new_qty > 0 else 0.0
+                qty = new_qty
+                tx.avg_cost_at_tx = avg_cost
+
+            elif tx.action == TxAction.SPLIT:
+                old_qty = qty
+                qty = old_qty + tx.quantity  # quantity = share_delta
+                avg_cost = round((avg_cost * old_qty) / qty, 4) if qty > 0 else 0.0
+                tx.avg_cost_at_tx = avg_cost
+
+        asset.quantity = max(0, qty)
+        asset.avg_cost = round(avg_cost, 4) if qty > 0 else 0.0
+        asset.total_invested = round(total_invested, 2)
+        asset.realized_pnl = round(realized_pnl, 2)
+        asset.total_dividend = round(total_dividend, 2)
+        asset.first_buy_date = first_buy_date
+        self.session.flush()
+        logger.info(f"[Portfolio] 重算完成 {ticker}：持股 {asset.quantity} 均成本 {asset.avg_cost:.4f}")

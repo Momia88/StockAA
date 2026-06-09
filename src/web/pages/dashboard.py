@@ -165,36 +165,65 @@ def render():
                     unsafe_allow_html=True,
                 )
 
-        # ── 股債配置（純股票 vs 純債券） ──────────
-        stock_v = by_type.get("個股", 0) + by_type.get("股票ETF", 0)
-        bond_v  = by_type.get("債券ETF", 0)
+    # ── 股債配置（股票成分 vs 債券成分） ──────────
+    if values:
+        st.divider()
+        st.subheader("股債配置")
+
+        # 拆成股票群（個股 + 股票ETF）與債券群（債券ETF）
+        stock_items, bond_items = [], []   # (ticker, name, value)
+        for a in summary.assets:
+            if a.quantity == 0:
+                continue
+            v = a.market_value if a.market_value else a.cost_basis
+            if a.asset_type == "債券ETF":
+                bond_items.append((a.ticker, a.name, v))
+            else:
+                stock_items.append((a.ticker, a.name, v))
+
+        stock_v = sum(i[2] for i in stock_items)
+        bond_v  = sum(i[2] for i in bond_items)
         total_sb = stock_v + bond_v or 1
 
-        st.markdown("##### 股債配置")
-        sb1, sb2 = st.columns(2)
-        sb1.metric(
-            "📈 股票部位",
-            f"{stock_v / total_sb * 100:.1f} %",
-            help=f"個股 + 股票ETF 共 {stock_v:,.0f} 元",
+        st.caption(
+            f"📈 股票部位 **{stock_v / total_sb * 100:.1f}%**（{stock_v:,.0f} 元）"
+            f" ｜ 🛡️ 債券部位 **{bond_v / total_sb * 100:.1f}%**（{bond_v:,.0f} 元）"
         )
-        sb2.metric(
-            "🛡️ 債券部位",
-            f"{bond_v / total_sb * 100:.1f} %",
-            help=f"債券ETF 共 {bond_v:,.0f} 元",
-        )
-        # 比例橫條
-        stock_pct = stock_v / total_sb * 100
-        bond_pct = bond_v / total_sb * 100
-        st.markdown(
-            f"<div style='display:flex;height:22px;border-radius:6px;overflow:hidden;"
-            f"font-size:12px;color:white;line-height:22px;text-align:center'>"
-            f"<div style='width:{stock_pct}%;background:#ef5350'>"
-            f"{'股 ' + format(stock_pct, '.0f') + '%' if stock_pct >= 12 else ''}</div>"
-            f"<div style='width:{bond_pct}%;background:#66bb6a'>"
-            f"{'債 ' + format(bond_pct, '.0f') + '%' if bond_pct >= 12 else ''}</div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
+
+        col_stock, col_bond = st.columns(2)
+
+        def _draw_group_pie(container, title, items, palette):
+            with container:
+                st.markdown(f"##### {title}")
+                if not items:
+                    st.info("（無持倉）")
+                    return
+                tickers = [i[0] for i in items]
+                names   = [i[1] for i in items]
+                vals    = [i[2] for i in items]
+                fig = go.Figure(go.Pie(
+                    labels=tickers,
+                    values=vals,
+                    customdata=names,
+                    hole=0.45,
+                    marker=dict(colors=palette),
+                    textinfo="label+percent",
+                    textfont=dict(size=13),
+                    hovertemplate="%{label} %{customdata}<br>市值：%{value:,.0f} 元<br>占比：%{percent}<extra></extra>",
+                ))
+                fig.update_layout(
+                    showlegend=False,
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    height=300,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        # 股票用紅橘暖色系、債券用綠藍冷色系
+        stock_palette = ["#ef5350", "#ff8a65", "#ffb74d", "#f06292", "#ba68c8", "#7986cb"]
+        bond_palette  = ["#66bb6a", "#26a69a", "#4db6ac", "#81c784", "#aed581"]
+
+        _draw_group_pie(col_stock, "📈 股票部位明細", stock_items, stock_palette)
+        _draw_group_pie(col_bond,  "🛡️ 債券部位明細", bond_items, bond_palette)
 
     # ── 集中度警示 ────────────────────────────────
     if values:

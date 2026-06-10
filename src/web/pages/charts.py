@@ -51,10 +51,18 @@ def _stacked_dividend_bar(df, x_field, x_order, x_fmt, title, height=320):
     return fig
 
 
-def _category(asset_type) -> str:
-    """資產分類：債券型 ETF 歸「債券」，其餘（個股/股票型 ETF）歸「股票」"""
+def _category(asset_type, ticker: str = "") -> str:
+    """資產分類：債券歸「債券」，其餘（個股/股票型 ETF）歸「股票」。
+
+    判定條件（任一成立即為債券）：
+      1. 資產類型為 BOND_ETF
+      2. 代碼以 B 結尾（台灣債券 ETF 慣例，如 00679B、00937B）——
+         可修正當初新增時資產類型選錯的情況。
+    """
     val = getattr(asset_type, "value", asset_type)
-    return "債券" if val == "BOND_ETF" else "股票"
+    if val == "BOND_ETF" or (ticker or "").upper().endswith("B"):
+        return "債券"
+    return "股票"
 
 
 def _pnl_stacked_fig(df_sub, title):
@@ -135,7 +143,7 @@ def render():
         if a.quantity > 0:
             snap_data.append({
                 "ticker": f"{a.ticker} {a.name}",
-                "分類": _category(a.asset_type),
+                "分類": _category(a.asset_type, a.ticker),
                 "未實現損益": a.unrealized_pnl or 0,
                 "已實現損益": a.realized_pnl,
                 "累計股利": a.total_dividend,
@@ -156,7 +164,7 @@ def render():
         if a.quantity > 0:
             cost_val_data.append({
                 "股票": a.name,
-                "分類": _category(a.asset_type),
+                "分類": _category(a.asset_type, a.ticker),
                 "持有成本": a.cost_basis,
                 "目前市值": a.market_value or a.cost_basis,
             })
@@ -207,14 +215,19 @@ def render():
 
         cur_year = date.today().year
         months = list(range(1, 13))
-        ty = df_div[df_div["year"] == cur_year]
 
-        # 4a. 本年度每月股息（堆疊；標題由圖內呈現，避免重複）
+        # 每月股息可選近三年（預設今年）
+        year_opts = [cur_year, cur_year - 1, cur_year - 2]
+        sel_year = st.selectbox("每月股息年度", year_opts, index=0,
+                                format_func=lambda y: f"{y} 年")
+        ty = df_div[df_div["year"] == sel_year]
+
+        # 4a. 每月股息（堆疊；標題由圖內呈現，避免重複）
         if ty.empty:
-            st.info(f"{cur_year} 年尚無股利記錄")
+            st.info(f"{sel_year} 年尚無股利記錄")
         else:
             fig_month = _stacked_dividend_bar(
-                ty, "month", months, lambda m: f"{m}月", f"{cur_year} 年每月股息"
+                ty, "month", months, lambda m: f"{m}月", f"{sel_year} 年每月股息"
             )
             st.plotly_chart(fig_month, use_container_width=True)
 
@@ -229,9 +242,9 @@ def render():
             )
             st.plotly_chart(fig_year, use_container_width=True)
 
-        # 4c. 本年度每月股息明細（完整 12 個月、含合計，用 st.table 完整呈現不捲動）
+        # 4c. 每月股息明細（完整 12 個月、含合計，用 st.table 完整呈現不捲動）
         if not ty.empty:
-            st.markdown(f"**{cur_year} 年每月股息明細**")
+            st.markdown(f"**{sel_year} 年每月股息明細**")
             pv = ty.pivot_table(index="month", columns="ticker", values="金額",
                                 aggfunc="sum", fill_value=0)
             pv = pv.reindex(months, fill_value=0)

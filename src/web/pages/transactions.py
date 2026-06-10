@@ -1,6 +1,8 @@
 """
 交易記錄頁面
 """
+import math
+
 import pandas as pd
 import streamlit as st
 
@@ -40,24 +42,33 @@ def render():
             ["全部", "買入", "賣出", "現金股利", "股票股利", "分割/合併"],
         )
     with col3:
-        limit = st.number_input("顯示筆數", min_value=10, max_value=500, value=50, step=10)
+        page_size = st.selectbox("每頁筆數", [10, 15, 30, 50], index=0)
 
     ticker_arg = None if selected == "全部" else selected
-    txs = get_transactions(ticker=ticker_arg, limit=limit)
+    all_txs = get_transactions(ticker=ticker_arg, limit=500)
 
     action_map_rev = {v: k for k, v in ACTION_LABEL.items()}
     if action_filter != "全部":
         action_key = action_map_rev.get(action_filter)
-        txs = [t for t in txs if t.action.value == action_key]
+        all_txs = [t for t in all_txs if t.action.value == action_key]
 
-    if not txs:
+    if not all_txs:
         st.info("沒有符合條件的交易記錄")
         return
 
-    cap_col, dl_col = st.columns([4, 1])
-    cap_col.caption(f"共 {len(txs)} 筆｜點選一列可修改或刪除")
+    # ── 分頁 ──────────────────────────────────────
+    total = len(all_txs)
+    total_pages = max(1, math.ceil(total / page_size))
+
+    cap_col, page_col, dl_col = st.columns([3, 2, 1])
+    cap_col.caption(f"共 {total} 筆｜點選一列可修改或刪除")
+    with page_col:
+        page = st.number_input(
+            f"頁次（共 {total_pages} 頁）",
+            min_value=1, max_value=total_pages, value=1, step=1,
+        )
     with dl_col:
-        csv_rows = get_transactions_dataframe_rows(ticker=ticker_arg, limit=limit)
+        csv_rows = get_transactions_dataframe_rows(ticker=ticker_arg, limit=500)
         csv_bytes = pd.DataFrame(csv_rows).to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             "📥 匯出 CSV",
@@ -67,11 +78,14 @@ def render():
             use_container_width=True,
         )
 
+    start = (int(page) - 1) * page_size
+    page_txs = all_txs[start:start + page_size]
+
     # ── 交易列表（可選取） ────────────────────────
-    tx_ids = [tx.id for tx in txs]
+    tx_ids = [tx.id for tx in page_txs]
 
     rows = []
-    for tx in txs:
+    for tx in page_txs:
         pnl_str = ""
         if tx.action.value == "SELL" and tx.realized_pnl != 0:
             sign = "+" if tx.realized_pnl > 0 else ""
@@ -92,11 +106,14 @@ def render():
     df = pd.DataFrame(rows)
     tbl_key = f"tx_tbl_{st.session_state.get('_tbl_ver', 0)}"
 
+    # 高度依當頁筆數動態調整，剛好容納全部列、不出現捲軸
+    table_height = (len(page_txs) + 1) * 35 + 3
+
     event = st.dataframe(
         df,
         use_container_width=True,
         hide_index=True,
-        height=420,
+        height=table_height,
         on_select="rerun",
         selection_mode="single-row",
         key=tbl_key,
@@ -163,9 +180,9 @@ def render():
 
     # ── 統計摘要 ──────────────────────────────────
     st.divider()
-    buy_txs  = [t for t in txs if t.action.value == "BUY"]
-    sell_txs = [t for t in txs if t.action.value == "SELL"]
-    div_txs  = [t for t in txs if t.action.value == "DIVIDEND"]
+    buy_txs  = [t for t in all_txs if t.action.value == "BUY"]
+    sell_txs = [t for t in all_txs if t.action.value == "SELL"]
+    div_txs  = [t for t in all_txs if t.action.value == "DIVIDEND"]
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("買入筆數", len(buy_txs))

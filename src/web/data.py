@@ -502,24 +502,36 @@ def get_liabilities() -> list[dict]:
             "lender": l.lender,
             "kind": l.kind.value,
             "kind_label": l.kind.label,
-            "balance": l.balance,
+            "repay_method": l.repay_method.value,
+            "repay_label": l.repay_method.label,
+            "balance": l.current_balance,
             "annual_rate": l.annual_rate,
-            "monthly_principal": l.monthly_principal,
+            "monthly_principal": l.monthly_principal_due,
             "monthly_interest": l.monthly_interest,
+            "monthly_payment": l.monthly_payment,
+            "original_principal": l.original_principal,
+            "total_periods": l.total_periods,
+            "periods_elapsed": l.periods_elapsed,
+            "start_date": l.start_date,
             "maturity_date": l.maturity_date,
             "note": l.note or "",
         } for l in repo.get_all()]
 
 
-def add_liability(name, lender, kind, balance, annual_rate,
-                  monthly_principal=0.0, maturity_date=None, note=None) -> None:
+def add_liability(name, lender, kind, annual_rate, repay_method="INTEREST_ONLY",
+                  balance=0.0, monthly_principal=0.0,
+                  original_principal=0.0, total_periods=0, start_date=None,
+                  maturity_date=None, note=None) -> None:
+    from src.models.liability import RepayMethod
     sf = _get_session_factory()
     with get_db_session(sf) as session:
         LiabilityRepository(session).create(
             name=name, lender=lender, kind=LiabilityType(kind),
-            balance=balance, annual_rate=annual_rate,
-            monthly_principal=monthly_principal,
-            maturity_date=maturity_date, note=note,
+            repay_method=RepayMethod(repay_method),
+            annual_rate=annual_rate,
+            balance=balance, monthly_principal=monthly_principal,
+            original_principal=original_principal, total_periods=total_periods,
+            start_date=start_date, maturity_date=maturity_date, note=note,
         )
 
 

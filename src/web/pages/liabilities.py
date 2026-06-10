@@ -76,25 +76,52 @@ def render():
         lender = a2.text_input("機構／帳戶 *", placeholder="如 元大證金、永豐、信貸銀行", key="liab_lender")
         kind = a3.selectbox("類型", _KIND_OPTIONS, format_func=lambda k: _KIND_LABEL[k], key="liab_kind")
 
-        a4, a5, a6 = st.columns(3)
-        balance = a4.number_input("貸款餘額 *", min_value=0.0, step=10000.0, format="%.0f", key="liab_bal")
-        rate_pct = a5.number_input("年利率（%）*", min_value=0.0, step=0.01, format="%.3f", key="liab_rate")
-        mprin = a6.number_input("每月還本金", min_value=0.0, step=1000.0, format="%.0f", key="liab_mprin")
+        m1, m2 = st.columns([2, 4])
+        repay = m1.radio("還款方式", ["INTEREST_ONLY", "AMORTIZED"],
+                         format_func=lambda r: {"INTEREST_ONLY": "只繳息（質借）",
+                                                "AMORTIZED": "本息平均攤還（信貸）"}[r],
+                         key="liab_repay")
+        rate_pct = m2.number_input("年利率（%）*", min_value=0.0, step=0.01, format="%.3f", key="liab_rate")
+
+        # 共用預設
+        balance = mprin = original = 0.0
+        periods = 0
+        start = None
+
+        if repay == "INTEREST_ONLY":
+            b1, b2 = st.columns(2)
+            balance = b1.number_input("貸款餘額 *", min_value=0.0, step=10000.0, format="%.0f", key="liab_bal")
+            mprin = b2.number_input("每月固定還本（選填）", min_value=0.0, step=1000.0, format="%.0f", key="liab_mprin")
+        else:
+            b1, b2, b3 = st.columns(3)
+            original = b1.number_input("原始本金 *", min_value=0.0, step=10000.0, format="%.0f", key="liab_orig")
+            periods = b2.number_input("總期數（月）*", min_value=1, step=1, key="liab_periods")
+            start = b3.date_input("起貸日 *", key="liab_start")
 
         a7, a8 = st.columns([1, 3])
         maturity = a7.date_input("到期日（選填）", value=None, key="liab_mat")
         note = a8.text_input("備註（選填）", key="liab_note")
 
+        # 攤還即時試算
+        if repay == "AMORTIZED" and original > 0 and periods > 0:
+            i = rate_pct / 100.0 / 12.0
+            pay = (original * i / (1 - (1 + i) ** (-periods))) if i else (original / periods)
+            st.caption(f"💡 試算月繳約 **{pay:,.0f} 元**（本金+利息固定，逐月比例不同）")
+
         if st.button("✅ 新增", type="primary", key="liab_add"):
             if not name or not lender:
                 st.error("請填寫名稱與機構")
-            elif balance <= 0:
+            elif repay == "INTEREST_ONLY" and balance <= 0:
                 st.error("貸款餘額必須大於 0")
+            elif repay == "AMORTIZED" and (original <= 0 or periods <= 0 or start is None):
+                st.error("攤還型需填原始本金、總期數與起貸日")
             else:
                 add_liability(
                     name=name.strip(), lender=lender.strip(), kind=kind,
-                    balance=balance, annual_rate=rate_pct / 100.0,
-                    monthly_principal=mprin, maturity_date=maturity, note=note or None,
+                    annual_rate=rate_pct / 100.0, repay_method=repay,
+                    balance=balance, monthly_principal=mprin,
+                    original_principal=original, total_periods=int(periods), start_date=start,
+                    maturity_date=maturity, note=note or None,
                 )
                 st.success("已新增")
                 st.rerun()
@@ -129,10 +156,13 @@ def render():
         "名稱": l["name"],
         "機構": l["lender"],
         "類型": l["kind_label"],
+        "還款": l["repay_label"],
         "餘額": _money(l["balance"]),
         "年利率": f"{l['annual_rate'] * 100:.3f}%",
         "月利息": _money(l["monthly_interest"]),
         "月還本金": _money(l["monthly_principal"]),
+        "月繳": _money(l["monthly_payment"]),
+        "期數": f"{l['periods_elapsed']}/{l['total_periods']}" if l["repay_method"] == "AMORTIZED" else "—",
         "到期日": str(l["maturity_date"]) if l["maturity_date"] else "—",
         "備註": l["note"],
     } for l in liabs])

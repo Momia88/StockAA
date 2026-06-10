@@ -33,16 +33,23 @@ from sqlalchemy import inspect, text
 from .base import Base
 
 # 目前程式對應的 schema 版本。每次改動資料表結構就 +1。
-LATEST_VERSION = 1
+LATEST_VERSION = 2
 
 # 既有（升級前未受本框架管理）資料庫的基準版本。
 # 這類 DB 的 user_version 為 0，但其結構等同第 1 版，故視為 BASELINE_VERSION。
 BASELINE_VERSION = 1
 
 # 版本 → 需套用於既有資料庫的 SQL 陳述式清單。
-# 範例（未啟用）：
-#   2: ["ALTER TABLE assets ADD COLUMN target_weight FLOAT DEFAULT 0.0"],
-MIGRATIONS: dict[int, list[str]] = {}
+# 每句獨立執行且容錯（欄位已存在會被略過），故全新建表已含這些欄位時也安全。
+MIGRATIONS: dict[int, list[str]] = {
+    # v2：負債支援本息平均攤還（信貸）所需欄位
+    2: [
+        "ALTER TABLE liabilities ADD COLUMN repay_method VARCHAR(20) DEFAULT 'INTEREST_ONLY'",
+        "ALTER TABLE liabilities ADD COLUMN original_principal FLOAT DEFAULT 0.0",
+        "ALTER TABLE liabilities ADD COLUMN total_periods INTEGER DEFAULT 0",
+        "ALTER TABLE liabilities ADD COLUMN start_date DATE",
+    ],
+}
 
 # 備份保留份數
 _KEEP_BACKUPS = 5
@@ -129,12 +136,17 @@ def run_migrations(engine) -> Optional[Path]:
     # 先建立新版本可能引入的「全新資料表」（不會更動既有表）
     Base.metadata.create_all(engine)
 
-    # 逐版套用欄位/資料層級的遷移 SQL
+    # 逐版套用欄位/資料層級的遷移 SQL。
+    # 每句獨立交易並容錯：若該欄位已存在（例如此表是本次 create_all 才於既有 DB
+    # 新建、已含最新欄位），ALTER 會失敗，略過即可，不影響其他語句。
     if effective < LATEST_VERSION:
-        with engine.begin() as conn:
-            for version in range(effective + 1, LATEST_VERSION + 1):
-                for stmt in MIGRATIONS.get(version, []):
-                    conn.execute(text(stmt))
+        for version in range(effective + 1, LATEST_VERSION + 1):
+            for stmt in MIGRATIONS.get(version, []):
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(stmt))
+                except Exception as e:  # noqa: BLE001
+                    print(f"[StockAA] 遷移語句略過（多為欄位已存在）：{e}")
 
     # 更新版本戳記（含把舊 DB 的 0 標記為 BASELINE/最新）
     if current != LATEST_VERSION:

@@ -448,7 +448,14 @@ def import_transactions(rows: list[dict], replace: bool = False) -> dict:
             parsed.append(_parse_import_row(row))
         except Exception as e:
             errors.append(f"第 {i} 列：{e}")
+
+    # 排序策略：結構性交易（買/賣/分割/股票股利）依日期先行，現金股利最後再套用。
+    # 因現金股利不影響均成本與股數，最後處理可避免「股利日期早於買入日期」時
+    # 持倉尚未建立而失敗；結構性交易維持日期順序以確保均成本/已實現損益正確。
     parsed.sort(key=lambda r: r["date"])
+    structural = [r for r in parsed if r["action"] != "DIVIDEND"]
+    dividends = [r for r in parsed if r["action"] == "DIVIDEND"]
+    ordered = structural + dividends
 
     success = 0
     with get_db_session(sf) as session:
@@ -457,7 +464,7 @@ def import_transactions(rows: list[dict], replace: bool = False) -> dict:
             session.query(Asset).delete()
             session.flush()
         svc = PortfolioService(session, brokerage_discount=settings.brokerage_discount)
-        for r in parsed:
+        for r in ordered:
             try:
                 with session.begin_nested():  # 每列獨立 savepoint，單列失敗不影響其他
                     _apply_import_row(svc, session, r)

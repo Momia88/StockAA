@@ -151,19 +151,24 @@ def render():
 
     buy_sell_txs = [t for t in all_txs if t.action.value in ("BUY", "SELL")]
     if buy_sell_txs:
+        # 以「月」彙總每月淨投入，再累加為累積淨投入
         df_cf = pd.DataFrame([{
-            "date": t.trade_date,
+            "ym": f"{t.trade_date.year}-{t.trade_date.month:02d}",
             "amount": t.net_amount,  # 正=買入支出，負=賣出收入
-        } for t in sorted(buy_sell_txs, key=lambda x: x.trade_date)])
-
-        df_cf["累積淨投入"] = df_cf["amount"].cumsum()
+        } for t in buy_sell_txs])
+        monthly = df_cf.groupby("ym")["amount"].sum().sort_index()
+        cum = monthly.cumsum()
 
         fig_cf = px.area(
-            df_cf, x="date", y="累積淨投入",
-            labels={"date": "日期", "累積淨投入": "累積淨投入（元）"},
+            x=cum.index.tolist(), y=cum.values,
+            labels={"x": "月份", "y": "累積淨投入（元）"},
             color_discrete_sequence=["#42a5f5"],
         )
-        fig_cf.update_layout(margin=dict(t=10, b=10), height=280)
+        fig_cf.update_layout(
+            xaxis=dict(type="category"),
+            yaxis_title="累積淨投入（元）",
+            margin=dict(t=10, b=10), height=280,
+        )
         st.plotly_chart(fig_cf, use_container_width=True)
 
     # ── 4. 股利收入記錄（依月／年彙總，依個股堆疊）─────────
@@ -181,32 +186,19 @@ def render():
         } for t in div_txs])
 
         cur_year = date.today().year
-
-        # 4a. 本年度每月股息（堆疊）
-        st.markdown(f"**{cur_year} 年每月股息**")
+        months = list(range(1, 13))
         ty = df_div[df_div["year"] == cur_year]
+
+        # 4a. 本年度每月股息（堆疊；標題由圖內呈現，避免重複）
         if ty.empty:
             st.info(f"{cur_year} 年尚無股利記錄")
         else:
-            months = list(range(1, 13))
             fig_month = _stacked_dividend_bar(
                 ty, "month", months, lambda m: f"{m}月", f"{cur_year} 年每月股息"
             )
             st.plotly_chart(fig_month, use_container_width=True)
 
-            # 每月股息列表（個股 × 月份，含合計）
-            pv = ty.pivot_table(index="month", columns="ticker", values="金額",
-                                aggfunc="sum", fill_value=0)
-            pv = pv.reindex(range(1, 13), fill_value=0)
-            pv["合計"] = pv.sum(axis=1)
-            pv.index = [f"{m}月" for m in pv.index]
-            st.dataframe(
-                pv.style.format("{:,.0f}"),
-                use_container_width=True,
-            )
-
         # 4b. 近三年總股息（堆疊）
-        st.markdown("**近三年總股息**")
         years = [cur_year - 2, cur_year - 1, cur_year]
         recent3 = df_div[df_div["year"].isin(years)]
         if recent3.empty:
@@ -216,3 +208,13 @@ def render():
                 recent3, "year", years, lambda y: f"{y} 年", "近三年總股息"
             )
             st.plotly_chart(fig_year, use_container_width=True)
+
+        # 4c. 本年度每月股息明細（完整 12 個月、含合計，用 st.table 完整呈現不捲動）
+        if not ty.empty:
+            st.markdown(f"**{cur_year} 年每月股息明細**")
+            pv = ty.pivot_table(index="month", columns="ticker", values="金額",
+                                aggfunc="sum", fill_value=0)
+            pv = pv.reindex(months, fill_value=0)
+            pv["合計"] = pv.sum(axis=1)
+            pv.index = [f"{m}月" for m in pv.index]
+            st.table(pv.style.format("{:,.0f}"))

@@ -14,6 +14,7 @@ from .base import Base
 from .asset import Asset  # noqa: F401
 from .transaction import Transaction  # noqa: F401
 from .price_history import PriceHistory  # noqa: F401
+from .liability import Liability, Setting  # noqa: F401
 
 
 def get_engine(db_path: str):

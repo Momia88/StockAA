@@ -3,7 +3,7 @@ Streamlit 資料存取層 — 直接使用 Python service layer（不經過 HTTP
 """
 import sys
 import threading
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 # 確保專案根目錄在 sys.path
@@ -18,7 +18,9 @@ from src.models.database import create_all_tables, get_db_session, get_engine
 from src.models.asset import Asset
 from src.models.transaction import Transaction
 from src.models.enums import AssetType, Exchange
+from src.models.liability import LiabilityType
 from src.repositories.asset_repo import AssetRepository
+from src.repositories.liability_repo import LiabilityRepository, SettingRepository
 from src.repositories.transaction_repo import TransactionRepository
 from src.services.calculation_service import CalculationService, PortfolioSummary
 from src.services.portfolio_service import PortfolioService
@@ -481,3 +483,120 @@ def clear_all_data() -> None:
     with get_db_session(sf) as session:
         session.query(Transaction).delete()
         session.query(Asset).delete()
+
+
+# ─────────────────────────────────────────────────────────
+# 負債（貸款／質借）與現金流
+# ─────────────────────────────────────────────────────────
+_BUDGET_KEYS = ("living_expense", "rent_tuition")  # 生活費、房租學費（月）
+
+
+def get_liabilities() -> list[dict]:
+    """取得所有負債（以 dict 回傳避免 detached）"""
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        repo = LiabilityRepository(session)
+        return [{
+            "id": l.id,
+            "name": l.name,
+            "lender": l.lender,
+            "kind": l.kind.value,
+            "kind_label": l.kind.label,
+            "balance": l.balance,
+            "annual_rate": l.annual_rate,
+            "monthly_principal": l.monthly_principal,
+            "monthly_interest": l.monthly_interest,
+            "maturity_date": l.maturity_date,
+            "note": l.note or "",
+        } for l in repo.get_all()]
+
+
+def add_liability(name, lender, kind, balance, annual_rate,
+                  monthly_principal=0.0, maturity_date=None, note=None) -> None:
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        LiabilityRepository(session).create(
+            name=name, lender=lender, kind=LiabilityType(kind),
+            balance=balance, annual_rate=annual_rate,
+            monthly_principal=monthly_principal,
+            maturity_date=maturity_date, note=note,
+        )
+
+
+def update_liability(liability_id, **kwargs) -> None:
+    if "kind" in kwargs and kwargs["kind"] is not None:
+        kwargs["kind"] = LiabilityType(kwargs["kind"])
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        LiabilityRepository(session).update(liability_id, **kwargs)
+
+
+def delete_liability(liability_id) -> None:
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        LiabilityRepository(session).delete(liability_id)
+
+
+def get_budget() -> dict:
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        repo = SettingRepository(session)
+        return {k: repo.get_float(f"budget_{k}", 0.0) for k in _BUDGET_KEYS}
+
+
+def set_budget(**kwargs) -> None:
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        repo = SettingRepository(session)
+        for k, v in kwargs.items():
+            if k in _BUDGET_KEYS:
+                repo.set(f"budget_{k}", str(float(v)))
+
+
+def get_trailing_annual_dividend() -> float:
+    """近 12 個月實際現金股利合計（供月配息估算）"""
+    cutoff = date.today() - timedelta(days=365)
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        repo = TransactionRepository(session)
+        txs = repo.get_all()
+        return sum(
+            t.price * t.quantity for t in txs
+            if t.action.value == "DIVIDEND" and t.trade_date >= cutoff
+        )
+
+
+def get_leverage_summary() -> dict:
+    """彙總槓桿與現金流指標"""
+    summary = get_portfolio_summary(no_price=False, cache_only=True)
+    market_value = summary.total_market_value or summary.total_cost_basis or 0.0
+
+    liabs = get_liabilities()
+    total_debt = sum(l["balance"] for l in liabs)
+    pledge_debt = sum(l["balance"] for l in liabs if l["kind"] == "STOCK_PLEDGE")
+    monthly_interest = sum(l["monthly_interest"] for l in liabs)
+    monthly_principal = sum(l["monthly_principal"] for l in liabs)
+
+    budget = get_budget()
+    annual_div = get_trailing_annual_dividend()
+    monthly_div = annual_div / 12.0
+
+    monthly_net = (
+        monthly_div - monthly_interest - monthly_principal
+        - budget["living_expense"] - budget["rent_tuition"]
+    )
+
+    return {
+        "market_value": market_value,
+        "total_debt": total_debt,
+        "pledge_debt": pledge_debt,
+        "net_worth": market_value - total_debt,
+        "ltv": (pledge_debt / market_value) if market_value else 0.0,
+        "monthly_interest": monthly_interest,
+        "monthly_principal": monthly_principal,
+        "annual_dividend": annual_div,
+        "monthly_dividend": monthly_div,
+        "living_expense": budget["living_expense"],
+        "rent_tuition": budget["rent_tuition"],
+        "monthly_net": monthly_net,
+    }

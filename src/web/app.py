@@ -39,8 +39,8 @@ st.markdown(
 st.divider()
 
 # ── Tab 導覽 ───────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["🏠 持倉總覽", "➕ 新增交易", "📋 交易記錄", "📊 損益分析"]
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["🏠 持倉總覽", "➕ 新增交易", "📋 交易記錄", "📊 損益分析", "🏦 資產負債"]
 )
 
 with tab1:
@@ -58,3 +58,7 @@ with tab3:
 with tab4:
     from src.web.pages.charts import render as render_charts
     render_charts()
+
+with tab5:
+    from src.web.pages.liabilities import render as render_liab
+    render_liab()

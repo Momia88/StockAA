@@ -87,7 +87,7 @@ def render():
     for a in summary.assets:
         if a.quantity > 0:
             cost_val_data.append({
-                "股票": f"{a.ticker}\n{a.name}",
+                "股票": a.name,
                 "類型": a.asset_type,
                 "持有成本": a.cost_basis,
                 "目前市值": a.market_value or a.cost_basis,
@@ -109,6 +109,7 @@ def render():
         fig_cv.update_layout(
             barmode="group",
             legend=dict(orientation="h"),
+            xaxis=dict(type="category"),  # 強制類別軸，避免名稱被當數字座標
             yaxis_title="金額（元）",
             margin=dict(t=10, b=40),
             height=350,

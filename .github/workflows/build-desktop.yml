@@ -9,6 +9,10 @@ on:
       - "v*"
   workflow_dispatch:
 
+# 允許工作流程建立 / 更新 Release（附加產物需要寫入權限）
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build (${{ matrix.label }})

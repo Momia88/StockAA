@@ -74,7 +74,11 @@ def _pnl_stacked_fig(df_sub, title):
         ("已實現損益", "#42a5f5"),
         ("累計股利", "#ffca28"),
     ):
-        fig.add_trace(go.Bar(name=col, x=df_sub["ticker"], y=df_sub[col], marker_color=color))
+        fig.add_trace(go.Bar(
+            name=col, x=df_sub["ticker"], y=df_sub[col], marker_color=color,
+            text=[f"{v:,.0f}" if abs(v) > 0 else "" for v in df_sub[col]],
+            textposition="inside",
+        ))
     fig.update_layout(
         title=title,
         barmode="relative",
@@ -90,8 +94,14 @@ def _pnl_stacked_fig(df_sub, title):
 def _cost_value_fig(df_sub, title):
     """成本 vs 市值的分組長條圖"""
     fig = go.Figure()
-    fig.add_trace(go.Bar(name="持有成本", x=df_sub["股票"], y=df_sub["持有成本"], marker_color="#90a4ae"))
-    fig.add_trace(go.Bar(name="目前市值", x=df_sub["股票"], y=df_sub["目前市值"], marker_color="#ef5350"))
+    fig.add_trace(go.Bar(
+        name="持有成本", x=df_sub["股票"], y=df_sub["持有成本"], marker_color="#90a4ae",
+        text=[f"{v:,.0f}" for v in df_sub["持有成本"]], textposition="auto",
+    ))
+    fig.add_trace(go.Bar(
+        name="目前市值", x=df_sub["股票"], y=df_sub["目前市值"], marker_color="#ef5350",
+        text=[f"{v:,.0f}" for v in df_sub["目前市值"]], textposition="auto",
+    ))
     fig.update_layout(
         title=title,
         barmode="group",
@@ -138,7 +148,25 @@ def render():
     # 背景抓取現價（不阻塞）；完成後局部自動刷新
     ensure_live_prices([a.ticker for a in summary.assets if a.quantity > 0])
 
-    # ── 1. 各股票損益長條圖 ─────────────────────
+    # ── 1. 買入成本 vs 市值 ─────────────────────
+    st.subheader("成本 vs 市值比較")
+
+    cost_val_data = []
+    for a in summary.assets:
+        if a.quantity > 0:
+            cost_val_data.append({
+                "股票": a.name,
+                "分類": _category(a.asset_type, a.ticker),
+                "持有成本": a.cost_basis,
+                "目前市值": a.market_value or a.cost_basis,
+            })
+
+    if cost_val_data:
+        _render_stock_bond(pd.DataFrame(cost_val_data), _cost_value_fig)
+
+    st.divider()
+
+    # ── 2. 各股票損益長條圖 ─────────────────────
     st.subheader("各持倉損益一覽")
 
     snap_data = []
@@ -156,24 +184,6 @@ def render():
     if snap_data:
         # 股票與債券金額級距差異大，分開兩張圖（寬螢幕並排、窄螢幕自動上下）
         _render_stock_bond(pd.DataFrame(snap_data), _pnl_stacked_fig)
-
-    st.divider()
-
-    # ── 2. 買入成本 vs 市值 ─────────────────────
-    st.subheader("成本 vs 市值比較")
-
-    cost_val_data = []
-    for a in summary.assets:
-        if a.quantity > 0:
-            cost_val_data.append({
-                "股票": a.name,
-                "分類": _category(a.asset_type, a.ticker),
-                "持有成本": a.cost_basis,
-                "目前市值": a.market_value or a.cost_basis,
-            })
-
-    if cost_val_data:
-        _render_stock_bond(pd.DataFrame(cost_val_data), _cost_value_fig)
 
     st.divider()
 

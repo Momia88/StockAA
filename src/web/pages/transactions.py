@@ -116,11 +116,13 @@ def render():
         if tx.action.value == "SELL" and tx.realized_pnl != 0:
             sign = "+" if tx.realized_pnl > 0 else ""
             pnl_str = f"{sign}{tx.realized_pnl:,.2f}"
+        # 現金股利每股金額常為小數（如 0.072），用 3 位避免被截斷
+        price_dec = 3 if tx.action.value == "DIVIDEND" else 2
         rows.append({
             "日期":       str(tx.trade_date),
             "代碼":       tx.ticker,
             "類型":       f"{ACTION_COLOR.get(tx.action.value, '')} {ACTION_LABEL.get(tx.action.value, tx.action.value)}",
-            "單價":       f"{tx.price:,.2f}",
+            "單價":       f"{tx.price:,.{price_dec}f}",
             "股數":       f"{tx.quantity:,}",
             "手續費":     f"{tx.fee:,.0f}",
             "交易稅":     f"{tx.tax:,.0f}",

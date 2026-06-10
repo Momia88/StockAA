@@ -18,8 +18,14 @@ datas = []
 binaries = []
 hiddenimports = []
 
-# ── 收集 Streamlit 及其資料密集型相依 ───────────────────────
-for pkg in ("streamlit", "altair", "pyarrow", "plotly", "pandas"):
+# ── 完整收集（子模組 + 資料檔 + 二進位）核心相依 ────────────
+# 含 pydantic_core / numpy 等帶 C 擴充（.pyd/.so）的套件，避免
+# Windows 出現 "No module named 'pydantic_core._pydantic_core'"。
+for pkg in (
+    "streamlit", "altair", "pyarrow", "plotly", "pandas", "numpy",
+    "narwhals", "pydantic", "pydantic_core", "pydantic_settings",
+    "sqlalchemy", "loguru", "requests",
+):
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -28,8 +34,26 @@ for pkg in ("streamlit", "altair", "pyarrow", "plotly", "pandas"):
     except Exception:
         pass
 
-# Streamlit 會用 importlib.metadata 查自身與相依套件版本
-datas += copy_metadata("streamlit", recursive=True)
+# ── 套件 metadata ────────────────────────────────────────────
+# streamlit / plotly 等在 import 時會用 importlib.metadata 讀自身版本，
+# 缺 metadata 會出現 "No package metadata was found for ..." 而崩潰。
+# 逐套件 try/except，避免單一缺漏導致整批未收集。
+for pkg in (
+    "streamlit", "plotly", "pandas", "numpy", "pyarrow", "altair",
+    "narwhals", "pydantic", "pydantic_core", "pydantic_settings",
+    "sqlalchemy", "requests", "loguru", "tenacity", "packaging",
+    "click", "rich", "tornado", "gitpython", "watchdog", "blinker",
+):
+    try:
+        datas += copy_metadata(pkg)
+    except Exception:
+        pass
+
+# 另外遞迴收集 streamlit 相依樹的 metadata（補齊上面清單外的相依）
+try:
+    datas += copy_metadata("streamlit", recursive=True)
+except Exception:
+    pass
 
 # ── 專案原始碼與 Streamlit 設定 ─────────────────────────────
 datas += [
@@ -44,6 +68,8 @@ hiddenimports += [
     "loguru",
     "pydantic",
     "pydantic_settings",
+    "pydantic_core",
+    "pydantic_core._pydantic_core",
     "urllib3",
 ]
 

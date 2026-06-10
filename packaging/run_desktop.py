@@ -36,6 +36,36 @@ def _prepare_data_dir() -> Path:
     return data_dir
 
 
+def _init_database(data_dir: Path) -> None:
+    """啟動時初始化資料庫：就地升級（含自動備份）＋ 首次灌入範例資料。
+
+    - 既有資料庫：若程式更新帶來新結構，會先自動備份再升級，舊資料不遺失。
+    - 全新資料庫：灌入示範持倉，讓使用者下載後即見到內容。
+    重新啟動或重裝 App 都不覆蓋既有資料（DB 落在 ~/StockAA，不在 App 內部）。
+    """
+    try:
+        from src.models.database import get_db_session, get_engine, get_session_factory
+        from src.models.migrations import run_migrations
+        from src.services.sample_data import seed_if_empty
+        from src.utils.config import get_settings
+
+        settings = get_settings()
+        engine = get_engine(settings.db_path)
+
+        # 建表 / 就地升級；若有升級會回傳備份路徑
+        backup = run_migrations(engine)
+        if backup is not None:
+            print(f"[StockAA] 偵測到資料庫升級，已自動備份 → {backup}")
+
+        session_factory = get_session_factory(engine)
+        with get_db_session(session_factory) as session:
+            count = seed_if_empty(session, brokerage_discount=settings.brokerage_discount)
+        if count:
+            print(f"[StockAA] 首次啟動：已灌入 {count} 筆範例資料 → {data_dir / 'portfolio.db'}")
+    except Exception as e:  # pragma: no cover — 初始化失敗不應阻擋 App 啟動
+        print(f"[StockAA] 資料庫初始化略過：{e}")
+
+
 def _open_browser() -> None:
     time.sleep(3)
     webbrowser.open(f"http://localhost:{PORT}")
@@ -61,7 +91,15 @@ def _bundle_hint() -> None:  # pragma: no cover
 
 
 def main() -> None:
-    _prepare_data_dir()
+    data_dir = _prepare_data_dir()
+
+    # 確保 `import src.*` 可解析（打包後在 _MEIPASS，dev 則在專案根目錄）
+    src_root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if src_root not in sys.path:
+        sys.path.insert(0, src_root)
+
+    # 初始化資料庫：自動升級（含備份）＋ 首次灌入範例資料
+    _init_database(data_dir)
 
     # 強制關閉開發模式：打包後 streamlit 不在 site-packages，會被誤判為
     # developmentMode=true，導致無法指定 server.port。必須在匯入 streamlit 前設定。

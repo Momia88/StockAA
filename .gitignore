@@ -15,6 +15,7 @@ venv/
 portfolio.db
 portfolio.db-shm
 portfolio.db-wal
+portfolio.db.bak-*
 *.sqlite
 *.sqlite3
 

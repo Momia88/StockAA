@@ -43,8 +43,13 @@ def get_engine(db_path: str):
 
 
 def create_all_tables(engine) -> None:
-    """建立所有資料表（初次使用）"""
-    Base.metadata.create_all(engine)
+    """建立資料表並就地升級舊資料庫（首次使用或程式更新時皆會呼叫）。
+
+    實際工作委派給輕量遷移框架：全新 DB 直接建出最新結構；
+    既有 DB 則先自動備份再套用 schema 變更，舊資料不遺失。
+    """
+    from .migrations import run_migrations
+    run_migrations(engine)
 
 
 def get_session_factory(engine):

@@ -51,6 +51,67 @@ def _stacked_dividend_bar(df, x_field, x_order, x_fmt, title, height=320):
     return fig
 
 
+def _category(asset_type) -> str:
+    """資產分類：債券型 ETF 歸「債券」，其餘（個股/股票型 ETF）歸「股票」"""
+    val = getattr(asset_type, "value", asset_type)
+    return "債券" if val == "BOND_ETF" else "股票"
+
+
+def _pnl_stacked_fig(df_sub, title):
+    """各持倉損益的分項堆疊長條圖（未實現/已實現/股利）"""
+    fig = go.Figure()
+    for col, color in (
+        ("未實現損益", "#ef5350"),
+        ("已實現損益", "#42a5f5"),
+        ("累計股利", "#ffca28"),
+    ):
+        fig.add_trace(go.Bar(name=col, x=df_sub["ticker"], y=df_sub[col], marker_color=color))
+    fig.update_layout(
+        title=title,
+        barmode="relative",
+        xaxis=dict(type="category", categoryorder="total descending"),
+        yaxis_title="損益（元）",
+        legend=dict(orientation="h", y=-0.2),
+        margin=dict(t=40, b=10),
+        height=400,
+    )
+    return fig
+
+
+def _cost_value_fig(df_sub, title):
+    """成本 vs 市值的分組長條圖"""
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name="持有成本", x=df_sub["股票"], y=df_sub["持有成本"], marker_color="#90a4ae"))
+    fig.add_trace(go.Bar(name="目前市值", x=df_sub["股票"], y=df_sub["目前市值"], marker_color="#ef5350"))
+    fig.update_layout(
+        title=title,
+        barmode="group",
+        xaxis=dict(type="category"),
+        yaxis_title="金額（元）",
+        legend=dict(orientation="h", y=-0.2),
+        margin=dict(t=40, b=40),
+        height=350,
+    )
+    return fig
+
+
+def _render_stock_bond(df, make_fig, empty_stock="無股票持倉", empty_bond="無債券持倉"):
+    """將圖表依股票/債券拆兩欄並排（窄螢幕 Streamlit 會自動上下堆疊）"""
+    stock_df = df[df["分類"] == "股票"]
+    bond_df = df[df["分類"] == "債券"]
+    col_s, col_b = st.columns(2)
+    with col_s:
+        if not stock_df.empty:
+            st.plotly_chart(make_fig(stock_df, "股票"), use_container_width=True)
+        else:
+            st.info(empty_stock)
+    with col_b:
+        if not bond_df.empty:
+            st.plotly_chart(make_fig(bond_df, "債券"), use_container_width=True)
+        else:
+            st.info(empty_bond)
+
+
 def render():
     st.subheader("損益分析")
 
@@ -74,6 +135,7 @@ def render():
         if a.quantity > 0:
             snap_data.append({
                 "ticker": f"{a.ticker} {a.name}",
+                "分類": _category(a.asset_type),
                 "未實現損益": a.unrealized_pnl or 0,
                 "已實現損益": a.realized_pnl,
                 "累計股利": a.total_dividend,
@@ -81,30 +143,8 @@ def render():
             })
 
     if snap_data:
-        df_snap = pd.DataFrame(snap_data)
-
-        # 單一堆疊長條（直向）：三個分項（未實現/已實現/股利）疊加，總高度即總損益
-        fig_total = go.Figure()
-        for col, color in (
-            ("未實現損益", "#ef5350"),
-            ("已實現損益", "#42a5f5"),
-            ("累計股利", "#ffca28"),
-        ):
-            fig_total.add_trace(go.Bar(
-                name=col,
-                x=df_snap["ticker"], y=df_snap[col],
-                marker_color=color,
-            ))
-        fig_total.update_layout(
-            title="綜合總損益排行（分項堆疊）",
-            barmode="relative",  # 支援正負值的堆疊
-            xaxis=dict(type="category", categoryorder="total descending"),  # 依總損益排序
-            yaxis_title="損益（元）",
-            legend=dict(orientation="h", y=-0.15),
-            margin=dict(t=40, b=10),
-            height=400,
-        )
-        st.plotly_chart(fig_total, use_container_width=True)
+        # 股票與債券金額級距差異大，分開兩張圖（寬螢幕並排、窄螢幕自動上下）
+        _render_stock_bond(pd.DataFrame(snap_data), _pnl_stacked_fig)
 
     st.divider()
 
@@ -116,33 +156,13 @@ def render():
         if a.quantity > 0:
             cost_val_data.append({
                 "股票": a.name,
-                "類型": a.asset_type,
+                "分類": _category(a.asset_type),
                 "持有成本": a.cost_basis,
                 "目前市值": a.market_value or a.cost_basis,
             })
 
     if cost_val_data:
-        df_cv = pd.DataFrame(cost_val_data)
-        fig_cv = go.Figure()
-        fig_cv.add_trace(go.Bar(
-            name="持有成本",
-            x=df_cv["股票"], y=df_cv["持有成本"],
-            marker_color="#90a4ae",
-        ))
-        fig_cv.add_trace(go.Bar(
-            name="目前市值",
-            x=df_cv["股票"], y=df_cv["目前市值"],
-            marker_color="#ef5350",
-        ))
-        fig_cv.update_layout(
-            barmode="group",
-            legend=dict(orientation="h"),
-            xaxis=dict(type="category"),  # 強制類別軸，避免名稱被當數字座標
-            yaxis_title="金額（元）",
-            margin=dict(t=10, b=40),
-            height=350,
-        )
-        st.plotly_chart(fig_cv, use_container_width=True)
+        _render_stock_bond(pd.DataFrame(cost_val_data), _cost_value_fig)
 
     st.divider()
 

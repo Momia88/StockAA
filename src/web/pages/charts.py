@@ -39,44 +39,30 @@ def render():
             })
 
     if snap_data:
-        df_snap = pd.DataFrame(snap_data).set_index("ticker")
+        df_snap = pd.DataFrame(snap_data)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_bar = px.bar(
-                df_snap.reset_index(),
-                x="ticker", y=["未實現損益", "已實現損益", "累計股利"],
-                barmode="group",
-                color_discrete_map={
-                    "未實現損益": "#ef5350",
-                    "已實現損益": "#42a5f5",
-                    "累計股利": "#ffca28",
-                },
-                labels={"value": "損益（元）", "ticker": ""},
-                title="分項損益（元）",
-            )
-            fig_bar.update_layout(
-                legend=dict(orientation="h", y=-0.2),
-                margin=dict(t=40, b=10),
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-        with col2:
-            fig_total = px.bar(
-                df_snap.reset_index().sort_values("總損益"),
-                x="總損益", y="ticker",
-                orientation="h",
-                color="總損益",
-                color_continuous_scale=["#388e3c", "#f5f5f5", "#d32f2f"],
-                color_continuous_midpoint=0,
-                labels={"總損益": "總損益（元）", "ticker": ""},
-                title="綜合總損益排行",
-            )
-            fig_total.update_layout(
-                coloraxis_showscale=False,
-                margin=dict(t=40, b=10),
-            )
-            st.plotly_chart(fig_total, use_container_width=True)
+        # 單一堆疊長條：三個分項（未實現/已實現/股利）疊加，總長度即總損益
+        fig_total = go.Figure()
+        for col, color in (
+            ("未實現損益", "#ef5350"),
+            ("已實現損益", "#42a5f5"),
+            ("累計股利", "#ffca28"),
+        ):
+            fig_total.add_trace(go.Bar(
+                name=col, orientation="h",
+                y=df_snap["ticker"], x=df_snap[col],
+                marker_color=color,
+            ))
+        fig_total.update_layout(
+            title="綜合總損益排行（分項堆疊）",
+            barmode="relative",  # 支援正負值的堆疊
+            yaxis=dict(categoryorder="total ascending"),  # 依總損益排序
+            xaxis_title="損益（元）",
+            legend=dict(orientation="h", y=-0.15),
+            margin=dict(t=40, b=10),
+            height=400,
+        )
+        st.plotly_chart(fig_total, use_container_width=True)
 
     st.divider()
 

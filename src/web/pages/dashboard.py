@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.web.data import get_portfolio_summary
+from src.web.price_async import ensure_live_prices
 
 
 def _fmt(val, decimals=0):
@@ -25,21 +26,27 @@ def render():
     col_btn, col_space, col_toggle = st.columns([2, 7, 2])
     with col_btn:
         if st.button("🔄 更新行情", use_container_width=True):
-            st.cache_resource.clear()
+            st.session_state["_force_price"] = True
             st.rerun()
     with col_toggle:
         no_price = st.toggle("略過股價", value=False)
 
-    with st.spinner("載入投資組合資料..."):
-        try:
-            summary = get_portfolio_summary(no_price=no_price)
-        except Exception as e:
-            st.error(f"讀取資料失敗：{e}")
-            return
+    # 只讀快取秒開頁面，現價由背景補上（見頁尾 ensure_live_prices）
+    try:
+        summary = get_portfolio_summary(no_price=no_price, cache_only=True)
+    except Exception as e:
+        st.error(f"讀取資料失敗：{e}")
+        return
 
     if not summary.assets:
         st.info("投資組合是空的！請至「新增交易」頁面加入第一筆持倉。")
         return
+
+    # 背景抓取現價（不阻塞）；完成後局部自動刷新
+    if not no_price:
+        live_tickers = [a.ticker for a in summary.assets if a.quantity > 0]
+        force = st.session_state.pop("_force_price", False)
+        ensure_live_prices(live_tickers, force=force)
 
     # ── 指標卡片 ──────────────────────────────────
     st.subheader("投資組合概覽")

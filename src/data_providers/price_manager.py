@@ -63,11 +63,21 @@ class PriceManager:
 
         return result
 
-    def get_prices_batch(self, tickers: list[str]) -> dict[str, Optional[PriceData]]:
+    def get_prices_batch(
+        self,
+        tickers: list[str],
+        cache_only: bool = False,
+        force_refresh: bool = False,
+    ) -> dict[str, Optional[PriceData]]:
         """
         批次取得多支股票的最新股價。
         若提供 session_factory，優先從 SQLite 快取讀取，
         若快取不足（如首次執行當日），才抓取完整市場行情並持久化。
+
+        Args:
+            cache_only: 只讀 SQLite 快取、絕不打網路（未快取者回 None）。
+                        供前端「先秒開頁面」使用。
+            force_refresh: 略過快取一律重新抓取（供「更新行情」用）。
 
         Returns:
             {ticker: PriceData or None}
@@ -75,8 +85,8 @@ class PriceManager:
         today = date.today()
         result: dict[str, Optional[PriceData]] = {}
 
-        # 嘗試從 SQLite 快取取得
-        if self._session_factory:
+        # 嘗試從 SQLite 快取取得（force_refresh 時跳過）
+        if self._session_factory and not force_refresh:
             cached_all = self._get_all_from_cache(today)
             for ticker in tickers:
                 if ticker in cached_all:
@@ -88,6 +98,12 @@ class PriceManager:
                 return result
         else:
             missing = list(tickers)
+
+        # 只讀快取模式：未快取者直接回 None，不打網路
+        if cache_only:
+            for ticker in missing:
+                result[ticker] = None
+            return result
 
         # 仍有未快取的股票，呼叫 API 取得完整市場行情
         logger.info(f"[PriceManager] 從 API 取得 {len(missing)} 支股票行情")

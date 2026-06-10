@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from src.web.data import get_portfolio_summary, get_transactions
+from src.web.price_async import ensure_live_prices
 
 
 def _stacked_dividend_bar(df, x_field, x_order, x_fmt, title, height=320):
@@ -123,17 +124,19 @@ def _render_stock_bond(df, make_fig, empty_stock="無股票持倉", empty_bond="
 def render():
     st.subheader("損益分析")
 
-    with st.spinner("載入資料..."):
-        try:
-            summary = get_portfolio_summary(no_price=False)
-            all_txs = get_transactions(limit=500)
-        except Exception as e:
-            st.error(f"讀取資料失敗：{e}")
-            return
+    try:
+        summary = get_portfolio_summary(no_price=False, cache_only=True)
+        all_txs = get_transactions(limit=500)
+    except Exception as e:
+        st.error(f"讀取資料失敗：{e}")
+        return
 
     if not summary.assets:
         st.info("尚無持倉資料")
         return
+
+    # 背景抓取現價（不阻塞）；完成後局部自動刷新
+    ensure_live_prices([a.ticker for a in summary.assets if a.quantity > 0])
 
     # ── 1. 各股票損益長條圖 ─────────────────────
     st.subheader("各持倉損益一覽")

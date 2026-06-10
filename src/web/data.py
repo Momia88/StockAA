@@ -2,6 +2,8 @@
 Streamlit 資料存取層 — 直接使用 Python service layer（不經過 HTTP）
 """
 import sys
+import threading
+from datetime import date
 from pathlib import Path
 
 # 確保專案根目錄在 sys.path
@@ -40,7 +42,16 @@ def _get_session_factory():
     )
 
 
-def get_portfolio_summary(include_closed: bool = False, no_price: bool = False) -> PortfolioSummary:
+def get_portfolio_summary(
+    include_closed: bool = False,
+    no_price: bool = False,
+    cache_only: bool = False,
+) -> PortfolioSummary:
+    """取得投資組合摘要。
+
+    cache_only=True 時只讀 SQLite 價格快取、不打網路（前端用來秒開頁面，
+    現價之後由背景執行緒補上，見 ensure_prices_async）。
+    """
     sf = _get_session_factory()
     settings = get_settings()
 
@@ -53,12 +64,68 @@ def get_portfolio_summary(include_closed: bool = False, no_price: bool = False) 
             mgr = PriceManager(timeout=settings.api_timeout, session_factory=sf)
             tickers = [a.ticker for a in assets]
             try:
-                prices = mgr.get_prices_batch(tickers)
+                prices = mgr.get_prices_batch(tickers, cache_only=cache_only)
             except Exception:
                 pass
 
         calc = CalculationService()
         return calc.build_portfolio_summary(assets, prices, active_only=not include_closed)
+
+
+# ─────────────────────────────────────────────────────────
+# 背景非同步抓取現價（先載入頁面、再更新價格）
+# ─────────────────────────────────────────────────────────
+_price_state: dict[str, str] = {}     # 今日 ISO 日期 -> "pending"/"done"
+_price_lock = threading.Lock()
+
+
+def _today_key() -> str:
+    return date.today().isoformat()
+
+
+def ensure_prices_async(tickers: list[str], force: bool = False) -> None:
+    """確保今日現價在背景抓取中（不阻塞前端）。
+
+    - 若快取已齊全：直接標記完成，不抓取。
+    - 否則啟動一個 daemon 執行緒抓取全市場行情並寫入 SQLite 快取。
+    - force=True 一律重抓（供「更新行情」用）。
+    """
+    if not tickers:
+        return
+    key = _today_key()
+    sf = _get_session_factory()
+    settings = get_settings()
+
+    with _price_lock:
+        state = _price_state.get(key)
+        if not force:
+            if state in ("pending", "done"):
+                return
+            mgr = PriceManager(timeout=settings.api_timeout, session_factory=sf)
+            cached = mgr.get_prices_batch(tickers, cache_only=True)
+            if all(cached.get(t) is not None for t in tickers):
+                _price_state[key] = "done"
+                return
+        _price_state[key] = "pending"
+
+    def _worker():
+        try:
+            mgr = PriceManager(timeout=settings.api_timeout, session_factory=sf)
+            mgr.get_prices_batch(tickers, force_refresh=force)
+        except Exception:
+            pass
+        finally:
+            with _price_lock:
+                _price_state[key] = "done"
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def prices_ready(tickers: list[str]) -> bool:
+    """背景抓取是否已完成（完成後前端可重讀快取顯示最新現價）"""
+    if not tickers:
+        return True
+    return _price_state.get(_today_key()) == "done"
 
 
 def get_transactions(ticker: Optional[str] = None, limit: int = 100):

@@ -3,7 +3,6 @@
 """
 from datetime import date
 
-import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
@@ -175,32 +174,7 @@ def render():
 
     st.divider()
 
-    # ── 3. 買賣累積現金流時序圖 ─────────────────
-    st.subheader("累積淨投入金額走勢")
-
-    buy_sell_txs = [t for t in all_txs if t.action.value in ("BUY", "SELL")]
-    if buy_sell_txs:
-        # 以「月」彙總每月淨投入，再累加為累積淨投入
-        df_cf = pd.DataFrame([{
-            "ym": f"{t.trade_date.year}-{t.trade_date.month:02d}",
-            "amount": t.net_amount,  # 正=買入支出，負=賣出收入
-        } for t in buy_sell_txs])
-        monthly = df_cf.groupby("ym")["amount"].sum().sort_index()
-        cum = monthly.cumsum()
-
-        fig_cf = px.area(
-            x=cum.index.tolist(), y=cum.values,
-            labels={"x": "月份", "y": "累積淨投入（元）"},
-            color_discrete_sequence=["#42a5f5"],
-        )
-        fig_cf.update_layout(
-            xaxis=dict(type="category"),
-            yaxis_title="累積淨投入（元）",
-            margin=dict(t=10, b=10), height=280,
-        )
-        st.plotly_chart(fig_cf, use_container_width=True)
-
-    # ── 4. 股利收入記錄（依月／年彙總，依個股堆疊）─────────
+    # ── 3. 股利收入記錄（依月／年彙總，依個股堆疊）─────────
     div_txs = [t for t in all_txs if t.action.value == "DIVIDEND"]
     if div_txs:
         st.divider()

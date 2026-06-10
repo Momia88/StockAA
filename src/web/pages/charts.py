@@ -55,12 +55,13 @@ def _category(asset_type, ticker: str = "") -> str:
     """資產分類：債券歸「債券」，其餘（個股/股票型 ETF）歸「股票」。
 
     判定條件（任一成立即為債券）：
-      1. 資產類型為 BOND_ETF
+      1. 資產類型為 BOND_ETF（注意：summary.assets 的 asset_type 為
+         label 中文字串「債券ETF」，故兩者皆需比對）
       2. 代碼以 B 結尾（台灣債券 ETF 慣例，如 00679B、00937B）——
-         可修正當初新增時資產類型選錯的情況。
+         作為類型萬一缺漏時的保險。
     """
     val = getattr(asset_type, "value", asset_type)
-    if val == "BOND_ETF" or (ticker or "").upper().endswith("B"):
+    if val in ("BOND_ETF", "債券ETF") or (ticker or "").upper().endswith("B"):
         return "債券"
     return "股票"
 

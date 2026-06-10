@@ -98,6 +98,19 @@ def main() -> None:
     if src_root not in sys.path:
         sys.path.insert(0, src_root)
 
+    # 預先在主執行緒完整載入 pandas / plotly。
+    # 凍結（PyInstaller）環境下，streamlit 會在獨立工作執行緒執行 app，
+    # plotly 繪製圖表時才「首次」延遲匯入 pandas，易與其他執行緒競態而出現
+    # "partially initialized module 'pandas' ... circular import"。
+    # 主執行緒先把它們完整載入並快取，工作執行緒便直接取用已初始化的模組。
+    try:
+        import pandas            # noqa: F401
+        import plotly            # noqa: F401
+        import plotly.graph_objects  # noqa: F401
+        import plotly.express    # noqa: F401
+    except Exception as e:  # pragma: no cover
+        print(f"[StockAA] 預載繪圖相依時警告：{e}")
+
     # 初始化資料庫：自動升級（含備份）＋ 首次灌入範例資料
     _init_database(data_dir)
 

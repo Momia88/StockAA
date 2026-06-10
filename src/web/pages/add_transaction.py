@@ -14,7 +14,7 @@ from src.utils.exceptions import (
 )
 from src.web.data import (
     do_buy, do_sell, do_dividend, do_split,
-    get_active_assets_brief, get_recent_assets, get_last_trade_date,
+    get_active_assets_brief, get_recent_assets,
 )
 
 _TYPE_LABEL = {"STOCK": "個股", "STOCK_ETF": "股票ETF", "BOND_ETF": "債券ETF"}
@@ -41,7 +41,7 @@ def render():
 
     tab_buy, tab_sell, tab_div, tab_split = st.tabs(["買入", "賣出", "現金股利", "股票分割"])
 
-    default_date = get_last_trade_date() or date.today()
+    default_date = date.today()  # 日期欄位一律預設為今天
     briefs = get_active_assets_brief()
     tickers, label_map, qty_map = _asset_maps(briefs)
 

@@ -9,7 +9,7 @@ import streamlit as st
 from src.web.data import (
     do_delete_transaction, do_edit_transaction, do_edit_split,
     get_asset_tickers, get_transaction_detail, get_transactions,
-    get_transactions_dataframe_rows,
+    get_transactions_dataframe_rows, import_transactions,
 )
 
 ACTION_LABEL = {
@@ -30,6 +30,32 @@ def _clear_selection():
 
 def render():
     st.subheader("交易記錄")
+
+    # ── 匯入 CSV ──────────────────────────────────
+    with st.expander("📥 匯入交易記錄（CSV）"):
+        st.caption(
+            "支援本系統匯出的 CSV。費用（手續費/交易稅）一律由系統自動計算；"
+            "買入需要名稱/資產類型/交易所，舊檔若缺這些欄位會自動推斷"
+            "（代碼 B 結尾→債券ETF、00 開頭→股票ETF、其餘→個股；交易所預設上市）。"
+        )
+        up = st.file_uploader("選擇 CSV 檔", type=["csv"], key="tx_import_file")
+        replace = st.checkbox("⚠️ 匯入前先清空現有所有交易與持倉（謹慎使用）", value=False)
+        if up is not None:
+            try:
+                import_df = pd.read_csv(up, dtype=str).fillna("")
+                st.caption(f"檔案讀取成功，共 {len(import_df)} 列")
+                if st.button("開始匯入", type="primary", key="tx_import_btn"):
+                    res = import_transactions(import_df.to_dict("records"), replace=replace)
+                    if res["success"]:
+                        st.success(f"成功匯入 {res['success']} 筆")
+                    if res["failed"]:
+                        st.warning(f"{res['failed']} 筆未匯入：")
+                        st.text("\n".join(res["errors"][:30]))
+                        if len(res["errors"]) > 30:
+                            st.caption(f"（僅顯示前 30 筆，另有 {len(res['errors']) - 30} 筆錯誤）")
+                    _clear_selection()
+            except Exception as e:
+                st.error(f"讀取或匯入失敗：{e}")
 
     # ── 篩選列 ────────────────────────────────────
     col1, col2, col3 = st.columns([2, 2, 1])

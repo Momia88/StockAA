@@ -13,6 +13,8 @@ from typing import Optional
 
 from sqlalchemy.orm import sessionmaker as _sessionmaker
 from src.models.database import create_all_tables, get_db_session, get_engine
+from src.models.asset import Asset
+from src.models.transaction import Transaction
 from src.models.enums import AssetType, Exchange
 from src.repositories.asset_repo import AssetRepository
 from src.repositories.transaction_repo import TransactionRepository
@@ -234,20 +236,174 @@ def get_last_trade_date():
 
 
 def get_transactions_dataframe_rows(ticker=None, limit=500) -> list[dict]:
-    """取得交易記錄的純資料 list[dict]，供 CSV 匯出"""
+    """取得交易記錄的純資料 list[dict]，供 CSV 匯出（含名稱/類型/交易所以利重新匯入）"""
     sf = _get_session_factory()
     with get_db_session(sf) as session:
         repo = TransactionRepository(session)
+        asset_repo = AssetRepository(session)
+        meta = {a.ticker: a for a in asset_repo.get_all()}
         txs = repo.get_by_ticker(ticker, limit=limit) if ticker else repo.get_all()[:limit]
-        return [{
-            "交易日":     str(t.trade_date),
-            "代碼":       t.ticker,
-            "類型":       t.action.value,
-            "單價":       t.price,
-            "股數":       t.quantity,
-            "手續費":     t.fee,
-            "交易稅":     t.tax,
-            "淨金額":     t.net_amount,
-            "已實現損益": t.realized_pnl,
-            "備註":       t.note or "",
-        } for t in txs]
+        rows = []
+        for t in txs:
+            a = meta.get(t.ticker)
+            rows.append({
+                "交易日":     str(t.trade_date),
+                "代碼":       t.ticker,
+                "名稱":       a.name if a else "",
+                "資產類型":   a.asset_type.value if a else "",
+                "交易所":     a.exchange.value if a else "",
+                "類型":       t.action.value,
+                "單價":       t.price,
+                "股數":       t.quantity,
+                "手續費":     t.fee,
+                "交易稅":     t.tax,
+                "淨金額":     t.net_amount,
+                "已實現損益": t.realized_pnl,
+                "備註":       t.note or "",
+            })
+        return rows
+
+
+# ─────────────────────────────────────────────────────────
+# CSV 匯入
+# ─────────────────────────────────────────────────────────
+_ACTION_IMPORT = {
+    "BUY": "BUY", "買入": "BUY",
+    "SELL": "SELL", "賣出": "SELL",
+    "DIVIDEND": "DIVIDEND", "現金股利": "DIVIDEND",
+    "STOCK_DIVIDEND": "STOCK_DIVIDEND", "股票股利": "STOCK_DIVIDEND",
+    "SPLIT": "SPLIT", "分割/合併": "SPLIT", "分割": "SPLIT",
+}
+_ATYPE_IMPORT = {
+    "STOCK": "STOCK", "個股": "STOCK",
+    "STOCK_ETF": "STOCK_ETF", "股票ETF": "STOCK_ETF",
+    "BOND_ETF": "BOND_ETF", "債券ETF": "BOND_ETF",
+}
+_EXCH_IMPORT = {"TWSE": "TWSE", "上市": "TWSE", "TPEx": "TPEx", "上櫃": "TPEx"}
+
+
+def _infer_asset_type(ticker: str) -> str:
+    """缺資產類型時的推斷：B 結尾→債券ETF、00 開頭→股票ETF、其餘→個股"""
+    t = ticker.upper()
+    if t.endswith("B"):
+        return "BOND_ETF"
+    if t.startswith("00"):
+        return "STOCK_ETF"
+    return "STOCK"
+
+
+def _parse_import_date(raw: str):
+    from datetime import date as _date
+    s = raw.strip().replace("/", "-")
+    try:
+        return _date.fromisoformat(s)
+    except ValueError:
+        raise ValueError(f"日期格式無法解析：{raw}")
+
+
+def _to_float(s: str) -> float:
+    return float(str(s).replace(",", "").strip() or 0)
+
+
+def _to_int(s: str) -> int:
+    return int(round(_to_float(s)))
+
+
+def _parse_import_row(row: dict) -> dict:
+    def g(*keys):
+        for k in keys:
+            if k in row and str(row[k]).strip() != "":
+                return str(row[k]).strip()
+        return ""
+
+    raw_date = g("交易日", "日期", "date")
+    if not raw_date:
+        raise ValueError("缺少交易日")
+    ticker = g("代碼", "ticker")
+    if not ticker:
+        raise ValueError("缺少代碼")
+    raw_action = g("類型", "action")
+    action = _ACTION_IMPORT.get(raw_action)
+    if action is None:
+        raise ValueError(f"未知交易類型：{raw_action}")
+
+    return {
+        "date": _parse_import_date(raw_date),
+        "ticker": ticker,
+        "action": action,
+        "price": _to_float(g("單價", "price") or "0"),
+        "quantity": _to_int(g("股數", "quantity") or "0"),
+        "name": g("名稱", "name") or ticker,
+        "asset_type": _ATYPE_IMPORT.get(g("資產類型"), "") or _infer_asset_type(ticker),
+        "exchange": _EXCH_IMPORT.get(g("交易所"), "") or "TWSE",
+        "note": g("備註", "note") or None,
+    }
+
+
+def _apply_import_row(svc: PortfolioService, session, r: dict) -> None:
+    a = r["action"]
+    if a == "BUY":
+        svc.buy(
+            ticker=r["ticker"], name=r["name"],
+            asset_type=AssetType(r["asset_type"]), exchange=Exchange(r["exchange"]),
+            price=r["price"], quantity=r["quantity"],
+            trade_date=r["date"], note=r["note"],
+        )
+    elif a == "SELL":
+        svc.sell(ticker=r["ticker"], price=r["price"], quantity=r["quantity"],
+                 trade_date=r["date"], note=r["note"])
+    elif a == "DIVIDEND":
+        svc.add_dividend(ticker=r["ticker"], dividend_per_share=r["price"],
+                         quantity=r["quantity"], trade_date=r["date"], note=r["note"])
+    elif a == "STOCK_DIVIDEND":
+        svc.add_stock_dividend(ticker=r["ticker"], bonus_shares=r["quantity"],
+                               trade_date=r["date"], note=r["note"])
+    elif a == "SPLIT":
+        cur = AssetRepository(session).get_by_ticker(r["ticker"])
+        if cur is None or cur.quantity == 0:
+            raise ValueError("分割前無持倉，無法重建比例")
+        ratio = (cur.quantity + r["quantity"]) / cur.quantity
+        svc.add_split(ticker=r["ticker"], split_ratio=ratio,
+                      trade_date=r["date"], note=r["note"])
+
+
+def import_transactions(rows: list[dict], replace: bool = False) -> dict:
+    """批次匯入交易。依日期排序逐筆過 service（自動算費用、重算持倉）。
+
+    replace=True 會先清空現有所有交易與持倉。回傳 {success, failed, errors}。
+    """
+    sf = _get_session_factory()
+    settings = get_settings()
+
+    parsed, errors = [], []
+    for i, row in enumerate(rows, start=2):  # 第 1 列為標題
+        try:
+            parsed.append(_parse_import_row(row))
+        except Exception as e:
+            errors.append(f"第 {i} 列：{e}")
+    parsed.sort(key=lambda r: r["date"])
+
+    success = 0
+    with get_db_session(sf) as session:
+        if replace:
+            session.query(Transaction).delete()
+            session.query(Asset).delete()
+            session.flush()
+        svc = PortfolioService(session, brokerage_discount=settings.brokerage_discount)
+        for r in parsed:
+            try:
+                with session.begin_nested():  # 每列獨立 savepoint，單列失敗不影響其他
+                    _apply_import_row(svc, session, r)
+                success += 1
+            except Exception as e:
+                errors.append(f"{r['date']} {r['ticker']} {r['action']}：{e}")
+
+    return {"success": success, "failed": len(errors), "errors": errors}
+
+
+def clear_all_data() -> None:
+    """清空所有交易與持倉（危險操作）"""
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        session.query(Transaction).delete()
+        session.query(Asset).delete()

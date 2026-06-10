@@ -186,6 +186,17 @@ def get_asset_tickers() -> list[str]:
         return [a.ticker for a in repo.get_all_active()]
 
 
+def get_active_assets_brief() -> list[dict]:
+    """取得所有在持個股的代碼、名稱與股數，供下拉選單顯示「代碼 名稱」與預設領息股數"""
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        repo = AssetRepository(session)
+        return [
+            {"ticker": a.ticker, "name": a.name, "quantity": a.quantity}
+            for a in repo.get_all_active()
+        ]
+
+
 def get_recent_assets(limit: int = 6) -> list[dict]:
     """取得最近交易過的股票（去重），供買入表單快速帶入"""
     sf = _get_session_factory()

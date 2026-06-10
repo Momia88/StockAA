@@ -1,5 +1,9 @@
 """
 新增交易頁面
+
+備註：刻意不使用 st.form，因 form 內按 Enter 會直接送出。改用一般元件 +
+st.button，讓按 Enter 只是提交該欄位（不會觸發「確認」），由使用者自行
+點擊確認鈕送出。
 """
 from datetime import date
 
@@ -10,7 +14,7 @@ from src.utils.exceptions import (
 )
 from src.web.data import (
     do_buy, do_sell, do_dividend, do_split,
-    get_asset_tickers, get_recent_assets, get_last_trade_date,
+    get_active_assets_brief, get_recent_assets, get_last_trade_date,
 )
 
 _TYPE_LABEL = {"STOCK": "個股", "STOCK_ETF": "股票ETF", "BOND_ETF": "債券ETF"}
@@ -24,12 +28,25 @@ def _prefill_buy(asset: dict):
     st.session_state["buy_exchange"] = asset["exchange"]
 
 
+def _asset_maps(briefs: list[dict]):
+    """由在持個股清單建立 代碼清單 / 顯示標籤 / 股數對照"""
+    tickers = [a["ticker"] for a in briefs]
+    label_map = {a["ticker"]: f"{a['ticker']} {a['name']}" for a in briefs}
+    qty_map = {a["ticker"]: a["quantity"] for a in briefs}
+    return tickers, label_map, qty_map
+
+
 def render():
     st.subheader("新增交易")
 
     tab_buy, tab_sell, tab_div, tab_split = st.tabs(["買入", "賣出", "現金股利", "股票分割"])
 
     default_date = get_last_trade_date() or date.today()
+    briefs = get_active_assets_brief()
+    tickers, label_map, qty_map = _asset_maps(briefs)
+
+    def _fmt(t):
+        return label_map.get(t, t)
 
     # ── 買入 ──────────────────────────────────
     with tab_buy:
@@ -49,7 +66,7 @@ def render():
                     args=(a,),
                 )
 
-        with st.form("buy_form"):
+        with st.container(border=True):
             c1, c2 = st.columns(2)
             ticker = c1.text_input("股票代碼 *", placeholder="如：2330、0050、00679B", key="buy_ticker")
             name = c2.text_input("股票名稱 *", placeholder="如：台積電", key="buy_name")
@@ -62,13 +79,13 @@ def render():
                                      key="buy_exchange")
 
             c5, c6, c7 = st.columns(3)
-            price = c5.number_input("買入單價（元/股）*", min_value=0.01, step=0.01, format="%.2f")
-            quantity = c6.number_input("股數 *", min_value=1, step=1)
-            trade_date = c7.date_input("交易日期", value=default_date)
+            price = c5.number_input("買入單價（元/股）*", min_value=0.01, step=0.01, format="%.2f", key="buy_price")
+            quantity = c6.number_input("股數 *", min_value=1, step=1, key="buy_qty")
+            trade_date = c7.date_input("交易日期", value=default_date, key="buy_date")
 
-            note = st.text_input("備註（選填）")
+            note = st.text_input("備註（選填）", key="buy_note")
 
-            submitted = st.form_submit_button("✅ 確認買入", use_container_width=True, type="primary")
+            submitted = st.button("✅ 確認買入", use_container_width=True, type="primary", key="buy_submit")
 
         if submitted:
             if not ticker or not name:
@@ -96,11 +113,11 @@ def render():
     # ── 賣出 ──────────────────────────────────
     with tab_sell:
         st.subheader("📤 賣出股票")
-        tickers = get_asset_tickers()
 
-        with st.form("sell_form"):
+        with st.container(border=True):
             c1, c2 = st.columns(2)
-            ticker_sell = c1.selectbox("股票代碼 *", tickers if tickers else ["（無持倉）"])
+            ticker_sell = c1.selectbox("股票代碼 *", tickers if tickers else ["（無持倉）"],
+                                       format_func=_fmt, key="sell_ticker")
             trade_date_sell = c2.date_input("交易日期", value=default_date, key="sell_date")
 
             c3, c4 = st.columns(2)
@@ -108,7 +125,7 @@ def render():
             qty_sell = c4.number_input("股數 *", min_value=1, step=1, key="sell_qty")
 
             note_sell = st.text_input("備註（選填）", key="sell_note")
-            submitted_sell = st.form_submit_button("✅ 確認賣出", use_container_width=True, type="primary")
+            submitted_sell = st.button("✅ 確認賣出", use_container_width=True, type="primary", key="sell_submit")
 
         if submitted_sell:
             if not tickers:
@@ -136,32 +153,31 @@ def render():
     # ── 現金股利 ──────────────────────────────
     with tab_div:
         st.subheader("💰 記錄現金股利")
-        tickers_div = get_asset_tickers()
 
-        with st.form("div_form"):
+        with st.container(border=True):
             c1, c2 = st.columns(2)
-            ticker_div = c1.selectbox("股票代碼 *", tickers_div if tickers_div else ["（無持倉）"])
+            ticker_div = c1.selectbox("股票代碼 *", tickers if tickers else ["（無持倉）"],
+                                      format_func=_fmt, key="div_ticker")
             trade_date_div = c2.date_input("發放日期", value=default_date, key="div_date")
 
             c3, c4 = st.columns(2)
-            dps = c3.number_input("每股股利（元）*", min_value=0.0001, step=0.01, format="%.4f")
-            custom_qty = c4.checkbox("自訂領息股數")
-            qty_div = None
-            if custom_qty:
-                qty_div = st.number_input("領息股數", min_value=1, step=1)
+            dps = c3.number_input("每股股利（元）*", min_value=0.0001, step=0.01, format="%.4f", key="div_dps")
+            # 領息股數預設為目前持股，使用者可自行修改（key 帶 ticker，切換股票會帶入該股股數）
+            default_qty = int(qty_map.get(ticker_div, 1) or 1)
+            qty_div = c4.number_input("領息股數", min_value=1, step=1,
+                                      value=max(default_qty, 1), key=f"div_qty_{ticker_div}")
 
             note_div = st.text_input("備註（選填）", key="div_note")
-            submitted_div = st.form_submit_button("✅ 確認記錄", use_container_width=True, type="primary")
+            submitted_div = st.button("✅ 確認記錄", use_container_width=True, type="primary", key="div_submit")
 
         if submitted_div:
-            if not tickers_div:
+            if not tickers:
                 st.error("目前無持倉")
             else:
                 try:
                     total = do_dividend(
                         ticker_div, dps, trade_date_div,
-                        int(qty_div) if qty_div else None,
-                        note_div or None
+                        int(qty_div), note_div or None
                     )
                     st.success(f"股利記錄完成！**{ticker_div}** 每股 {dps:.4f} 元，共 **{total:,.2f} 元**")
                 except AssetNotFoundError as e:
@@ -172,23 +188,23 @@ def render():
     # ── 股票分割 ──────────────────────────────
     with tab_split:
         st.subheader("✂️ 股票分割 / 合併")
-        tickers_sp = get_asset_tickers()
 
-        with st.form("split_form"):
+        with st.container(border=True):
             c1, c2 = st.columns(2)
-            ticker_sp = c1.selectbox("股票代碼 *", tickers_sp if tickers_sp else ["（無持倉）"])
+            ticker_sp = c1.selectbox("股票代碼 *", tickers if tickers else ["（無持倉）"],
+                                     format_func=_fmt, key="split_ticker")
             trade_date_sp = c2.date_input("分割日期", value=default_date, key="split_date")
 
             ratio = st.number_input(
                 "分割比例 *",
-                min_value=0.01, step=0.5, value=2.0, format="%.2f",
+                min_value=0.01, step=0.5, value=2.0, format="%.2f", key="split_ratio",
                 help="2.0 = 2:1 分割（股數加倍）｜0.5 = 1:2 合併（股數減半）"
             )
             note_sp = st.text_input("備註（選填）", key="split_note")
-            submitted_sp = st.form_submit_button("✅ 確認記錄", use_container_width=True, type="primary")
+            submitted_sp = st.button("✅ 確認記錄", use_container_width=True, type="primary", key="split_submit")
 
         if submitted_sp:
-            if not tickers_sp:
+            if not tickers:
                 st.error("目前無持倉")
             else:
                 try:

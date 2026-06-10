@@ -1,12 +1,54 @@
 """
 損益分析頁面
 """
+from datetime import date
+
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 import streamlit as st
 
 from src.web.data import get_portfolio_summary, get_transactions
+
+
+def _stacked_dividend_bar(df, x_field, x_order, x_fmt, title, height=320):
+    """繪製依個股堆疊的股利長條圖，分項顯示金額、各長條頂端標註總計。
+
+    df 需含欄位：x_field、ticker（顯示標籤）、金額
+    """
+    fig = go.Figure()
+    totals = {xv: 0.0 for xv in x_order}
+    for tk in sorted(df["ticker"].unique()):
+        sub = df[df["ticker"] == tk]
+        yvals = []
+        for xv in x_order:
+            v = float(sub[sub[x_field] == xv]["金額"].sum())
+            yvals.append(v)
+            totals[xv] += v
+        fig.add_trace(go.Bar(
+            name=tk,
+            x=[x_fmt(xv) for xv in x_order], y=yvals,
+            text=[f"{v:,.0f}" if v > 0 else "" for v in yvals],
+            textposition="inside",
+        ))
+    fig.update_layout(
+        title=title,
+        barmode="stack",
+        xaxis=dict(type="category"),
+        yaxis_title="金額（元）",
+        legend=dict(orientation="h", y=-0.2),
+        margin=dict(t=40, b=10),
+        height=height,
+    )
+    # 各長條頂端標註總金額
+    for xv in x_order:
+        if totals[xv] > 0:
+            fig.add_annotation(
+                x=x_fmt(xv), y=totals[xv],
+                text=f"<b>{totals[xv]:,.0f}</b>",
+                showarrow=False, yshift=12,
+            )
+    return fig
 
 
 def render():
@@ -124,21 +166,53 @@ def render():
         fig_cf.update_layout(margin=dict(t=10, b=10), height=280)
         st.plotly_chart(fig_cf, use_container_width=True)
 
-    # ── 4. 股利收入長條圖 ───────────────────────
+    # ── 4. 股利收入記錄（依月／年彙總，依個股堆疊）─────────
     div_txs = [t for t in all_txs if t.action.value == "DIVIDEND"]
     if div_txs:
         st.divider()
         st.subheader("股利收入記錄")
+
+        name_map = {a.ticker: a.name for a in summary.assets}
         df_div = pd.DataFrame([{
-            "date": str(t.trade_date),
-            "ticker": t.ticker,
-            "股利金額": t.price * t.quantity,
+            "year": t.trade_date.year,
+            "month": t.trade_date.month,
+            "ticker": f"{t.ticker} {name_map.get(t.ticker, '')}".strip(),
+            "金額": t.price * t.quantity,
         } for t in div_txs])
 
-        fig_div = px.bar(
-            df_div, x="date", y="股利金額", color="ticker",
-            labels={"date": "日期", "股利金額": "金額（元）", "ticker": "股票"},
-            title="歷次股利收入",
-        )
-        fig_div.update_layout(margin=dict(t=40, b=10), height=300)
-        st.plotly_chart(fig_div, use_container_width=True)
+        cur_year = date.today().year
+
+        # 4a. 本年度每月股息（堆疊）
+        st.markdown(f"**{cur_year} 年每月股息**")
+        ty = df_div[df_div["year"] == cur_year]
+        if ty.empty:
+            st.info(f"{cur_year} 年尚無股利記錄")
+        else:
+            months = list(range(1, 13))
+            fig_month = _stacked_dividend_bar(
+                ty, "month", months, lambda m: f"{m}月", f"{cur_year} 年每月股息"
+            )
+            st.plotly_chart(fig_month, use_container_width=True)
+
+            # 每月股息列表（個股 × 月份，含合計）
+            pv = ty.pivot_table(index="month", columns="ticker", values="金額",
+                                aggfunc="sum", fill_value=0)
+            pv = pv.reindex(range(1, 13), fill_value=0)
+            pv["合計"] = pv.sum(axis=1)
+            pv.index = [f"{m}月" for m in pv.index]
+            st.dataframe(
+                pv.style.format("{:,.0f}"),
+                use_container_width=True,
+            )
+
+        # 4b. 近三年總股息（堆疊）
+        st.markdown("**近三年總股息**")
+        years = [cur_year - 2, cur_year - 1, cur_year]
+        recent3 = df_div[df_div["year"].isin(years)]
+        if recent3.empty:
+            st.info("近三年尚無股利記錄")
+        else:
+            fig_year = _stacked_dividend_bar(
+                recent3, "year", years, lambda y: f"{y} 年", "近三年總股息"
+            )
+            st.plotly_chart(fig_year, use_container_width=True)

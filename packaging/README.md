@@ -36,12 +36,12 @@ PyInstaller **無法跨平台編譯**——Mac 上做不出 Windows `.exe`。
   點「其他資訊 → 仍要執行」。
 
 程式會自動：
-1. 在使用者家目錄建立 `~/StockAA/` 資料夾（存放 `portfolio.db` 與 `logs/`）。
+1. 在使用者家目錄建立 `~/StockAA_DB/` 資料夾（存放 `portfolio.db` 與 `logs/`，與程式資料夾 `StockAA` 區隔）。若偵測到舊版的 `~/StockAA/portfolio.db` 會自動沿用（複製到新資料夾，舊檔保留作備援）。
 2. 啟動本機伺服器並開啟瀏覽器到 `http://localhost:8501`。
 
 ### 搭配 Google Drive 同步
 
-在 `~/StockAA/` 放一個 `.env`，內容指向 Google Drive 同步資料夾即可：
+在 `~/StockAA_DB/` 放一個 `.env`，內容指向 Google Drive 同步資料夾即可：
 
 ```
 DB_PATH=/Users/<你的帳號>/Google Drive/My Drive/StockAA/portfolio.db

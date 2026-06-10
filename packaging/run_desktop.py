@@ -5,7 +5,7 @@ StockAA 桌面啟動器
 啟動內嵌的 Streamlit 伺服器，並自動開啟瀏覽器。
 
 資料存放：
-  - 預設資料夾為使用者家目錄下的 ~/StockAA/
+  - 預設資料夾為使用者家目錄下的 ~/StockAA_DB/（與程式資料夾 StockAA 區隔）
   - portfolio.db 與 logs/ 會落在此處（避免寫入唯讀的 App 內部）
   - 若該資料夾放有 .env（可指向 Google Drive 路徑），會自動沿用
 """
@@ -25,11 +25,36 @@ def _resource_path(rel: str) -> str:
     return os.path.join(base, rel)
 
 
+def _migrate_legacy_dir(old_dir: Path, new_dir: Path) -> None:
+    """把舊版資料夾（~/StockAA）的 DB 搬到新資料夾（~/StockAA_DB）。
+
+    僅在新資料夾尚無 portfolio.db、而舊資料夾有時才搬移，避免覆蓋。
+    一併搬移 WAL/SHM 邊檔與既有備份；保留舊檔不刪，作為安全備援。
+    """
+    old_db = old_dir / "portfolio.db"
+    new_db = new_dir / "portfolio.db"
+    if new_db.exists() or not old_db.exists():
+        return
+    import shutil
+    for f in old_dir.iterdir():
+        if f.name == "portfolio.db" or f.name.startswith("portfolio.db"):
+            try:
+                shutil.copy2(f, new_dir / f.name)
+            except Exception as e:  # pragma: no cover
+                print(f"[StockAA] 舊資料搬移警告（{f.name}）：{e}")
+    print(f"[StockAA] 已將舊資料從 {old_dir} 搬移至 {new_dir}（舊檔保留作備援）")
+
+
 def _prepare_data_dir() -> Path:
-    """建立使用者可寫入的資料夾，存放 portfolio.db 與 logs"""
-    data_dir = Path.home() / "StockAA"
+    """建立使用者可寫入的資料夾，存放 portfolio.db 與 logs。
+
+    資料夾名稱用 StockAA_DB，與解壓後的程式資料夾（StockAA）區隔，避免混淆。
+    """
+    data_dir = Path.home() / "StockAA_DB"
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "logs").mkdir(exist_ok=True)
+    # 從舊版資料夾（~/StockAA）沿用既有資料
+    _migrate_legacy_dir(Path.home() / "StockAA", data_dir)
     # 切換工作目錄，讓 ./portfolio.db 與 logs/ 都落在此處；
     # 若此資料夾內有 .env，pydantic-settings 也會自動讀取
     os.chdir(data_dir)

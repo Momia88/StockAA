@@ -41,7 +41,7 @@ def render():
     if snap_data:
         df_snap = pd.DataFrame(snap_data)
 
-        # 單一堆疊長條：三個分項（未實現/已實現/股利）疊加，總長度即總損益
+        # 單一堆疊長條（直向）：三個分項（未實現/已實現/股利）疊加，總高度即總損益
         fig_total = go.Figure()
         for col, color in (
             ("未實現損益", "#ef5350"),
@@ -49,15 +49,15 @@ def render():
             ("累計股利", "#ffca28"),
         ):
             fig_total.add_trace(go.Bar(
-                name=col, orientation="h",
-                y=df_snap["ticker"], x=df_snap[col],
+                name=col,
+                x=df_snap["ticker"], y=df_snap[col],
                 marker_color=color,
             ))
         fig_total.update_layout(
             title="綜合總損益排行（分項堆疊）",
             barmode="relative",  # 支援正負值的堆疊
-            yaxis=dict(categoryorder="total ascending"),  # 依總損益排序
-            xaxis_title="損益（元）",
+            xaxis=dict(type="category", categoryorder="total descending"),  # 依總損益排序
+            yaxis_title="損益（元）",
             legend=dict(orientation="h", y=-0.15),
             margin=dict(t=40, b=10),
             height=400,

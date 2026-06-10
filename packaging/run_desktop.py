@@ -63,6 +63,9 @@ def _bundle_hint() -> None:  # pragma: no cover
 def main() -> None:
     _prepare_data_dir()
 
+    # 強制關閉開發模式：打包後 streamlit 不在 site-packages，會被誤判為
+    # developmentMode=true，導致無法指定 server.port。必須在匯入 streamlit 前設定。
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
     os.environ.setdefault("STREAMLIT_BROWSER_GATHER_USAGE_STATS", "false")
     os.environ.setdefault("STREAMLIT_SERVER_HEADLESS", "true")
 

@@ -4,7 +4,7 @@
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.web.data import get_portfolio_summary
+from src.web.data import get_portfolio_summary, get_debt_summary
 from src.web.price_async import ensure_live_prices
 
 
@@ -47,6 +47,49 @@ def render():
         live_tickers = [a.ticker for a in summary.assets if a.quantity > 0]
         force = st.session_state.pop("_force_price", False)
         ensure_live_prices(live_tickers, force=force)
+
+    # ── 資產淨值卡片 ──────────────────────────────
+    debt_info = get_debt_summary()
+    total_mv = summary.total_market_value or summary.total_cost_basis or 0.0
+    net_worth = total_mv - debt_info["total_debt"]
+    nw_color = "#d32f2f" if net_worth >= 0 else "#388e3c"
+    nw_sign = "+" if net_worth > 0 else ""
+
+    st.markdown(f"""
+<div style="
+    background: linear-gradient(135deg, rgba(33,150,243,0.10) 0%, rgba(156,39,176,0.08) 100%);
+    border: 1px solid rgba(128,128,128,0.18);
+    border-radius: 14px;
+    padding: 22px 28px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+">
+    <div>
+        <div style="font-size:0.82rem;color:gray;margin-bottom:4px">💰 資產淨值（市值 − 負債）</div>
+        <div style="font-size:1.9rem;font-weight:700;color:{nw_color};letter-spacing:-0.5px">
+            {nw_sign}{net_worth:,.0f} <span style="font-size:1rem;font-weight:400">元</span>
+        </div>
+    </div>
+    <div style="display:flex;gap:28px;flex-wrap:wrap">
+        <div style="text-align:right">
+            <div style="font-size:0.78rem;color:gray">總持倉市值</div>
+            <div style="font-size:1.15rem;font-weight:600">{total_mv:,.0f} 元</div>
+        </div>
+        <div style="text-align:right">
+            <div style="font-size:0.78rem;color:gray">總負債</div>
+            <div style="font-size:1.15rem;font-weight:600;color:#ef6c00">{debt_info['total_debt']:,.0f} 元</div>
+        </div>
+        <div style="text-align:right">
+            <div style="font-size:0.78rem;color:gray">質借比 LTV</div>
+            <div style="font-size:1.15rem;font-weight:600">{(debt_info['pledge_debt'] / total_mv * 100) if total_mv else 0:.1f}%</div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
     # ── 指標卡片 ──────────────────────────────────
     st.subheader("投資組合概覽")

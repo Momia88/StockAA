@@ -549,6 +549,19 @@ def delete_liability(liability_id) -> None:
         LiabilityRepository(session).delete(liability_id)
 
 
+def get_debt_summary() -> dict:
+    """只讀負債的彙總（不重算持倉），供首頁用既有市值計算淨值"""
+    sf = _get_session_factory()
+    with get_db_session(sf) as session:
+        liabs = LiabilityRepository(session).get_all()
+        return {
+            "total_debt": sum(l.current_balance for l in liabs),
+            "pledge_debt": sum(l.current_balance for l in liabs if l.kind.value == "STOCK_PLEDGE"),
+            "monthly_interest": sum(l.monthly_interest for l in liabs),
+            "count": len(liabs),
+        }
+
+
 def get_budget() -> dict:
     sf = _get_session_factory()
     with get_db_session(sf) as session:
